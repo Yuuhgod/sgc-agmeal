@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Buscar Registros{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-header card-header-agmeal">
+        <i class="fa-solid fa-magnifying-glass me-2"></i>Filtros de Busca
+    </div>
+    <div class="card-body bg-white rounded-bottom">
+        <form action="/buscar" method="POST">
+            <div class="row align-items-end">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label fw-bold text-muted small">Nome do Associado</label>
+                    <input type="text" class="form-control" name="nome" placeholder="Parte do nome...">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label fw-bold text-muted small">Matrícula</label>
+                    <input type="text" class="form-control" name="matricula" placeholder="Exata...">
+                </div>
+                <div class="col-md-2 mb-3">
+                    <label class="form-label fw-bold text-muted small">Ano de Admissão</label>
+                    <input type="number" class="form-control" name="ano" placeholder="Ex: 2022">
+                </div>
+                <div class="col-md-3 mb-3 d-grid">
+                    <button type="submit" class="btn btn-primary-agmeal fw-bold"><i class="fa-solid fa-search me-2"></i>Pesquisar</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if resultados is not none %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3" style="color: var(--agmeal-azul);">
+        <span><i class="fa-solid fa-list me-2"></i>Resultados Encontrados: {{ resultados|length }}</span>
+        
+        {% if resultados|length > 0 %}
+        <form action="/exportar_pdf" method="POST" class="m-0 p-0" target="_blank">
+            <input type="hidden" name="nome_export" value="{{ request.form.get('nome', '') }}">
+            <input type="hidden" name="matricula_export" value="{{ request.form.get('matricula', '') }}">
+            <input type="hidden" name="ano_export" value="{{ request.form.get('ano', '') }}">
+            <button type="submit" class="btn btn-sm btn-ouro"><i class="fa-solid fa-file-pdf me-2"></i>Exportar Busca em PDF</button>
+        </form>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead style="background-color: var(--agmeal-azul); color: white;">
+                    <tr>
+                        <th class="ps-4">Matrícula</th>
+                        <th>Nome Completo</th>
+                        <th>CPF</th>
+                        <th>Admissão</th>
+                        <th class="text-center pe-4">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pessoa in resultados %}
+                    <tr>
+                        <td class="ps-4"><strong>{{ pessoa.matricula }}</strong></td>
+                        <td>{{ pessoa.nome }}</td>
+                        <td>{{ pessoa.cpf }}</td>
+                        <td>{{ pessoa.data_admissao.strftime('%d/%m/%Y') }}</td>
+                        <td class="text-center pe-4">
+                            <div class="btn-group" role="group">
+                                <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
+                                <a href="/exportar_ficha/{{ pessoa.matricula }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Gerar Ficha"><i class="fa-solid fa-file-pdf"></i></a>
+                                <a href="/excluir/{{ pessoa.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Tem certeza que deseja excluir o registro de {{ pessoa.nome }}?')" title="Excluir"><i class="fa-solid fa-trash"></i></a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted">
+                            <i class="fa-solid fa-inbox fa-3x mb-3 opacity-25"></i><br>
+                            Utilize os filtros acima para buscar associados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

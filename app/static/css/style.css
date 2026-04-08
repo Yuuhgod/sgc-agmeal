@@ -1,0 +1,84 @@
+:root {
+    --agmeal-azul: #0A2342;
+    --agmeal-azul-claro: #143866;
+    --agmeal-ouro: #D4AF37;
+    --agmeal-ouro-escuro: #B8962F;
+}
+
+body { 
+    background-color: #F4F6F9; 
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* ================= NAVBAR ================= */
+.navbar-agmeal { background-color: var(--agmeal-azul); }
+.navbar-agmeal .navbar-brand, .navbar-agmeal .nav-link { color: white !important; transition: color 0.3s ease; }
+.navbar-agmeal .nav-link:hover { color: var(--agmeal-ouro) !important; }
+
+/* ================= CARDS E PAINÉIS ================= */
+.card { 
+    border: none; 
+    border-radius: 10px;
+    transition: all 0.3s ease; /* Prepara o card para animação */
+}
+
+/* Efeito de flutuação ao passar o mouse (Excelente para o Dashboard) */
+a .card:hover, .card.hover-effect:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(10, 35, 66, 0.15) !important;
+}
+
+.card-header-agmeal {
+    background-color: #E2E8F0;
+    border-bottom: 3px solid var(--agmeal-azul);
+    color: var(--agmeal-azul);
+    font-weight: bold;
+    border-radius: 10px 10px 0 0 !important;
+}
+
+/* ================= BOTÕES (O Efeito UAU) ================= */
+.btn {
+    transition: all 0.25s ease-in-out; /* Transição suave em tudo */
+    border-radius: 6px;
+}
+
+.btn:active {
+    transform: scale(0.97); /* Dá um pequeno "aperto" quando clica */
+}
+
+.btn-primary-agmeal {
+    background-color: var(--agmeal-azul);
+    border-color: var(--agmeal-azul);
+    color: white;
+}
+.btn-primary-agmeal:hover {
+    background-color: var(--agmeal-azul-claro);
+    color: white;
+    transform: translateY(-2px); /* Botão sobe um pouquinho */
+    box-shadow: 0 4px 10px rgba(10, 35, 66, 0.3); /* Cria uma sombra elegante */
+}
+
+.btn-ouro {
+    background-color: var(--agmeal-ouro);
+    border-color: var(--agmeal-ouro);
+    color: #000 !important; 
+    font-weight: bold;
+}
+.btn-ouro:hover {
+    background-color: var(--agmeal-ouro-escuro);
+    color: #000 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(212, 175, 55, 0.4);
+}
+
+/* ================= FORMULÁRIOS ================= */
+/* Muda aquela borda azul padrão feia do navegador para o Dourado da AGMEAL */
+.form-control:focus {
+    border-color: var(--agmeal-ouro);
+    box-shadow: 0 0 0 0.25rem rgba(212, 175, 55, 0.25);
+}
+
+/* Deixa as tabelas mais limpas */
+.table-hover tbody tr:hover {
+    background-color: rgba(212, 175, 55, 0.05);
+}

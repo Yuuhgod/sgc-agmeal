@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Editar Perfil{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-3">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 border-top border-primary border-3">
+            <div class="card-header bg-white pb-0 border-0 pt-4">
+                <h4 style="color: var(--agmeal-azul);"><i class="fa-solid fa-user-gear me-2"></i>Editar Meu Perfil</h4>
+            </div>
+            <div class="card-body">
+                <form action="/perfil" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nome de Usuário (Login)</label>
+                        <input type="text" class="form-control" name="username" value="{{ usuario.username }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nova Senha</label>
+                        <input type="password" class="form-control" name="nova_senha" placeholder="Deixe em branco para não alterar">
+                    </div>
+                    
+                    <hr class="my-4 text-muted">
+                    <div class="alert alert-secondary py-3 border-0">
+                        <p class="mb-2 fw-bold text-dark"><i class="fa-solid fa-lock me-2"></i>Confirmação de Segurança</p>
+                        <label class="form-label mb-1" style="font-size: 0.9rem;">Digite sua senha atual para salvar alterações:</label>
+                        <input type="password" class="form-control" name="senha_atual" required>
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                        <a href="/" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-primary-agmeal px-4 fw-bold">Salvar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

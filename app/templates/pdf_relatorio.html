@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório AGMEAL</title>
+    <style>
+        /* Configuração da Folha A4 para impressão/PDF */
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* A MÁGICA DA QUEBRA DE PÁGINA */
+        .ficha-individual {
+            page-break-after: always; /* Cada ficha pula para uma nova folha */
+            padding: 20px;
+        }
+
+        /* Remove a quebra de página do último elemento para não gerar folha em branco */
+        .ficha-individual:last-child {
+            page-break-after: avoid;
+        }
+
+        /* Estilização Institucional */
+        .cabecalho {
+            text-align: center;
+            border-bottom: 3px solid #0A2342; /* Azul Marinho AGMEAL */
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+        }
+
+        .cabecalho h1 {
+            color: #0A2342;
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .cabecalho h3 {
+            color: #D4AF37; /* Ouro */
+            margin: 5px 0 0 0;
+            font-size: 16px;
+        }
+
+        .campo {
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .campo strong {
+            color: #0A2342;
+        }
+        
+        .tabela-dados {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .tabela-dados td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+
+    {% for pessoa in resultados %}
+    <div class="ficha-individual">
+        
+        <div class="cabecalho">
+            <h1>SGC - AGMEAL</h1>
+            <h3>Ficha de Registro Funcional</h3>
+        </div>
+
+        <table class="tabela-dados">
+            <tr>
+                <td colspan="2"><div class="campo"><strong>Nome Completo:</strong><br>{{ pessoa.nome }}</div></td>
+            </tr>
+            <tr>
+                <td><div class="campo"><strong>Matrícula:</strong><br>{{ pessoa.matricula }}</div></td>
+                <td><div class="campo"><strong>Data de Admissão:</strong><br>{{ pessoa.data_admissao.strftime('%d/%m/%Y') }}</div></td>
+            </tr>
+            <tr>
+                <td><div class="campo"><strong>CPF:</strong><br>{{ pessoa.cpf }}</div></td>
+                <td><div class="campo"><strong>RG:</strong><br>{{ pessoa.rg }}</div></td>
+            </tr>
+            <tr>
+                <td><div class="campo"><strong>Data de Nascimento:</strong><br>{{ pessoa.data_nascimento.strftime('%d/%m/%Y') }}</div></td>
+                <td><div class="campo"><strong>E-mail:</strong><br>{{ pessoa.email }}</div></td>
+            </tr>
+            <tr>
+                <td colspan="2"><div class="campo"><strong>Endereço:</strong><br>{{ pessoa.endereco }}</div></td>
+            </tr>
+            <tr>
+                <td colspan="2"><div class="campo"><strong>Dependentes:</strong><br>{{ pessoa.dependentes or 'Nenhum informado' }}</div></td>
+            </tr>
+        </table>
+        
+        <div style="text-align: center; margin-top: 80px; font-size: 12px; color: #777;">
+
+            <p>Documento gerado em {{ now }}</p>
+        </div>
+
+    </div>
+    {% endfor %}
+    <script>
+    // Faz os alertas sumirem sozinhos após 4 segundos (4000 milissegundos)
+    setTimeout(function() {
+        let alertas = document.querySelectorAll('.alert:not(.alert-secondary)');
+        alertas.forEach(function(alerta) {
+            let bsAlert = new bootstrap.Alert(alerta);
+            bsAlert.close();
+        });
+    }, 4000);
+</script>
+
+</body>
+</html>
