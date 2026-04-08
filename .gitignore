@@ -1,0 +1,21 @@
+# Ambientes Virtuais
+.venv/
+venv/
+env/
+
+# Arquivos do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Banco de Dados (NUNCA subir dados reais de associados pro GitHub)
+data/sgc.db
+*.sqlite3
+
+# Variáveis de Ambiente e Segredos
+.env
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
