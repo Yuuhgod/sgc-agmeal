@@ -6,16 +6,16 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 import base64
 from database import db, Associado, Usuario
 from sqlalchemy import extract
-from flask import make_response 
+from flask import make_response
 from weasyprint import HTML
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.secret_key = "agmeal_secreta_2026" 
+app.secret_key = "agmeal_secreta_2026"
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, '..', 'data')
-os.makedirs(data_dir, exist_ok=True) 
+os.makedirs(data_dir, exist_ok=True)
 
 db_path = os.path.join(data_dir, 'sgc.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
@@ -37,23 +37,23 @@ with app.app_context():
 def validar_cpf(cpf):
     # Remove tudo que não for número
     cpf = re.sub(r'\D', '', cpf)
-    
+
     # Verifica tamanho e se tem números repetidos (ex: 11111111111)
     if len(cpf) != 11 or cpf == cpf[0] * 11:
         return False
-    
+
     # Calcula o primeiro dígito verificador
     soma = sum(int(cpf[i]) * (10 - i) for i in range(9))
     digito1 = (soma * 10) % 11
     if digito1 >= 10: digito1 = 0
     if digito1 != int(cpf[9]): return False
-    
+
     # Calcula o segundo dígito verificador
     soma = sum(int(cpf[i]) * (11 - i) for i in range(10))
     digito2 = (soma * 10) % 11
     if digito2 >= 10: digito2 = 0
     if digito2 != int(cpf[10]): return False
-    
+
     return True
 
 @app.before_request
@@ -96,10 +96,10 @@ def setup():
 
         novo_admin = Usuario(username=username, palavra_recuperacao=palavra)
         novo_admin.set_senha(senha)
-        
+
         db.session.add(novo_admin)
         db.session.commit()
-        
+
         flash('Instalação concluída! Faça login com seu novo usuário.', 'success')
         return redirect(url_for('login'))
 
@@ -113,9 +113,9 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         senha = request.form['senha']
-        
+
         usuario = Usuario.query.filter_by(username=username).first()
-        
+
         if usuario and usuario.check_senha(senha):
             session['usuario_id'] = usuario.id
             session['username'] = usuario.username
@@ -136,9 +136,9 @@ def esqueci_senha():
         username = request.form['username']
         palavra = request.form['palavra_recuperacao']
         nova_senha = request.form['nova_senha']
-        
+
         usuario = Usuario.query.filter_by(username=username).first()
-        
+
         if usuario and usuario.palavra_recuperacao == palavra:
             if usuario.check_senha(nova_senha):
                 flash('A nova senha não pode ser igual à senha atual.', 'warning')
@@ -166,13 +166,13 @@ def cadastro():
     if request.method == 'POST':
         try:
             cpf_limpo = request.form['cpf'].strip()
-            
-            # --- NOVA TRAVA DE CPF ---
+
+            # --- SE O CPF FOR INVÁLIDO ---
             if not validar_cpf(cpf_limpo):
                 flash('O CPF digitado é matematicamente inválido.', 'danger')
-                return redirect(url_for('cadastro'))
-            # -------------------------
-            
+                # MUDANÇA: Retorna a página com os dados ao invés de redirecionar
+                return render_template('cadastro.html', username=session.get('username'))
+
             foto_b64 = request.form.get('foto_base64')
             nome_arquivo = None
 
@@ -181,7 +181,7 @@ def cadastro():
                 extensao = "png" if "image/png" in header else "jpg"
                 nome_arquivo = secure_filename(f"{request.form['matricula']}_perfil.{extensao}")
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
-                
+
                 with open(caminho_salvar, "wb") as fh:
                     fh.write(base64.b64decode(encoded))
 
@@ -202,11 +202,15 @@ def cadastro():
             db.session.add(novo_associado)
             db.session.commit()
             flash('Associado cadastrado com sucesso!', 'success')
+
+            # MANTÉM REDIRECT APENAS NO SUCESSO (Para limpar a tela para o próximo cadastro)
+            return redirect(url_for('cadastro'))
+
         except Exception as e:
             db.session.rollback()
             flash('Erro ao cadastrar. Verifique se CPF ou Matrícula já existem.', 'danger')
-            
-        return redirect(url_for('cadastro'))
+            # MUDANÇA: Retorna a página com os dados
+            return render_template('cadastro.html', username=session.get('username'))
 
     return render_template('cadastro.html', username=session.get('username'))
 
@@ -214,7 +218,7 @@ def cadastro():
 @login_required
 def buscar():
     resultados = None
-    
+
     if request.method == 'POST':
         nome_busca = request.form.get('nome')
         matricula_busca = request.form.get('matricula')
@@ -260,7 +264,7 @@ def exportar_pdf():
 
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     html_renderizado = render_template('pdf_relatorio.html', resultados=resultados, now=data_geracao)
-    
+
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
     response = make_response(pdf)
@@ -281,11 +285,11 @@ def exportar_ficha(matricula):
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
     html_renderizado = render_template(
-        'pdf_relatorio.html', 
-        resultados=[associado], 
+        'pdf_relatorio.html',
+        resultados=[associado],
         now=data_geracao
     )
-    
+
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
     response = make_response(pdf)
@@ -302,13 +306,13 @@ def editar(id):
     if request.method == 'POST':
         try:
             cpf_limpo = request.form['cpf'].strip()
-            
+
             # --- NOVA TRAVA DE CPF ---
             if not validar_cpf(cpf_limpo):
                 flash('O CPF digitado é matematicamente inválido.', 'danger')
                 return redirect(url_for('editar', id=id))
             # -------------------------
-            
+
             associado.nome = request.form['nome']
             associado.matricula = request.form['matricula']
             associado.rg = request.form['rg']
@@ -331,7 +335,7 @@ def editar(id):
             db.session.commit()
             flash('Cadastro atualizado com sucesso!', 'success')
             return redirect(url_for('buscar'))
-            
+
         except Exception as e:
             db.session.rollback()
             flash('Erro ao atualizar. Verifique se o novo CPF ou Matrícula já existem no sistema.', 'danger')
@@ -342,7 +346,7 @@ def editar(id):
 @login_required
 def excluir(id):
     associado = Associado.query.get_or_404(id)
-    
+
     try:
         db.session.delete(associado)
         db.session.commit()
@@ -350,14 +354,14 @@ def excluir(id):
     except Exception as e:
         db.session.rollback()
         flash('Erro ao tentar excluir o registro.', 'danger')
-    
+
     return redirect(url_for('buscar'))
 
 @app.route('/perfil', methods=['GET', 'POST'])
 @login_required
 def perfil():
     usuario = Usuario.query.get(session['usuario_id'])
-    
+
     if request.method == 'POST':
         senha_atual = request.form['senha_atual']
         novo_username = request.form['username'].strip()
@@ -372,9 +376,9 @@ def perfil():
             if existente:
                 flash('Este nome de usuário já está em uso.', 'warning')
                 return redirect(url_for('perfil'))
-            
+
             usuario.username = novo_username
-            session['username'] = novo_username 
+            session['username'] = novo_username
 
         if nova_senha:
             if usuario.check_senha(nova_senha):
@@ -392,7 +396,7 @@ def perfil():
 @login_required
 def seguranca():
     usuario = Usuario.query.get(session['usuario_id'])
-    
+
     if request.method == 'POST':
         senha_atual = request.form['senha_atual']
         nova_palavra = request.form['nova_palavra'].strip()
@@ -419,9 +423,9 @@ def listar_todos():
 def exportar_lista_simples():
     associados = Associado.query.order_by(Associado.nome).all()
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-    
+
     html_renderizado = render_template('pdf_lista_simples.html', associados=associados, now=data_geracao)
-    
+
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
     response = make_response(pdf)
