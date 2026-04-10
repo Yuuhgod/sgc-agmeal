@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <title>Relatório AGMEAL</title>
     <style>
-        /* Configuração da Folha A4 para impressão/PDF */
+        /* Configuração da Folha A4 - Margem reduzida para ganhar espaço */
         @page {
             size: A4;
-            margin: 2cm;
+            margin: 1cm; 
         }
         
         body {
@@ -17,40 +17,24 @@
             padding: 0;
         }
 
-        /* A MÁGICA DA QUEBRA DE PÁGINA */
-        .ficha-individual {
-            page-break-after: always; /* Cada ficha pula para uma nova folha */
-            padding: 20px;
+        .ficha-associado {
+            page-break-inside: avoid; 
+            margin-bottom: 0px; 
+        }
+        
+        .quebra-pagina {
+            page-break-after: always; 
+        }
+        
+        .linha-divisoria {
+            border-top: 2px dashed #ccc; 
+            margin: 15px 0; /* Margem da divisória reduzida */
         }
 
-        /* Remove a quebra de página do último elemento para não gerar folha em branco */
-        .ficha-individual:last-child {
-            page-break-after: avoid;
-        }
-
-        /* Estilização Institucional */
-        .cabecalho {
-            text-align: center;
-            border-bottom: 3px solid #0A2342; /* Azul Marinho AGMEAL */
-            padding-bottom: 15px;
-            margin-bottom: 30px;
-        }
-
-        .cabecalho h1 {
-            color: #0A2342;
-            margin: 0;
-            font-size: 24px;
-        }
-
-        .cabecalho h3 {
-            color: #D4AF37; /* Ouro */
-            margin: 5px 0 0 0;
-            font-size: 16px;
-        }
-
+        /* Fontes e margens mais compactas */
         .campo {
-            margin-bottom: 15px;
-            font-size: 14px;
+            margin-bottom: 2px;
+            font-size: 12px; /* Fonte ligeiramente menor */
         }
 
         .campo strong {
@@ -60,28 +44,59 @@
         .tabela-dados {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
+            margin-top: 5px;
         }
         
         .tabela-dados td {
-            padding: 10px;
+            padding: 4px 8px; /* Espaço em branco dentro das células cortado pela metade */
             border-bottom: 1px solid #eee;
+        }
+
+        .rodape {
+            text-align: center;
+            margin-top: 5px;
+            font-size: 10px;
+            color: #777;
+        }
+        
+        .rodape p {
+            margin: 0;
         }
     </style>
 </head>
 <body>
 
     {% for pessoa in resultados %}
-    <div class="ficha-individual">
+    
+    <div class="ficha-associado">
         
-        <div class="cabecalho">
-            <h1>SGC - AGMEAL</h1>
-            <h3>Ficha de Registro Funcional</h3>
-        </div>
+        <table width="100%" style="margin-bottom: 8px; border-bottom: 3px solid #0A2342; padding-bottom: 5px;">
+            <tr>
+                <td style="text-align: left; vertical-align: bottom;">
+                    <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
+                    <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Ficha de Registro Funcional</h3>
+                </td>
+                <td style="text-align: right; width: 3.5cm; vertical-align: bottom;">
+                    {% if pessoa.foto_perfil %}
+                        <img src="{{ url_for('static', filename='uploads/fotos/' ~ pessoa.foto_perfil) }}" style="width: 2.6cm; height: 3.5cm; object-fit: cover; border: 1px solid #0A2342; border-radius: 4px; display: block; margin-left: auto;">
+                    {% else %}
+                        <table style="width: 2.6cm; height: 3.5cm; border: 1px dashed #999; margin-left: auto; border-collapse: collapse;">
+                            <tr>
+                                <td style="text-align: center; vertical-align: middle; font-size: 10px; color: #999; padding: 0;">Sem Foto</td>
+                            </tr>
+                        </table>
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
 
         <table class="tabela-dados">
             <tr>
                 <td colspan="2"><div class="campo"><strong>Nome Completo:</strong><br>{{ pessoa.nome }}</div></td>
+            </tr>
+            <tr>
+                <td width="50%"><div class="campo"><strong>Telefone:</strong><br>{{ pessoa.telefone or 'Não informado' }}</div></td>
+                <td width="50%"><div class="campo"><strong>WhatsApp:</strong><br>{{ pessoa.telefone_whatsapp or 'Não informado' }}</div></td>
             </tr>
             <tr>
                 <td><div class="campo"><strong>Matrícula:</strong><br>{{ pessoa.matricula }}</div></td>
@@ -103,23 +118,19 @@
             </tr>
         </table>
         
-        <div style="text-align: center; margin-top: 80px; font-size: 12px; color: #777;">
-
+        <div class="rodape">
             <p>Documento gerado em {{ now }}</p>
         </div>
 
     </div>
+
+    {% if loop.index % 2 == 0 and not loop.last %}
+        <div class="quebra-pagina"></div>
+    {% elif not loop.last %}
+        <div class="linha-divisoria"></div>
+    {% endif %}
+
     {% endfor %}
-    <script>
-    // Faz os alertas sumirem sozinhos após 4 segundos (4000 milissegundos)
-    setTimeout(function() {
-        let alertas = document.querySelectorAll('.alert:not(.alert-secondary)');
-        alertas.forEach(function(alerta) {
-            let bsAlert = new bootstrap.Alert(alerta);
-            bsAlert.close();
-        });
-    }, 4000);
-</script>
 
 </body>
 </html>

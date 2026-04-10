@@ -2,10 +2,12 @@ import os
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, session
+import base64
 from database import db, Associado, Usuario
 from sqlalchemy import extract
 from flask import make_response 
 from weasyprint import HTML
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "agmeal_secreta_2026" 
@@ -17,6 +19,14 @@ os.makedirs(data_dir, exist_ok=True)
 db_path = os.path.join(data_dir, 'sgc.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads', 'fotos')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Cria a pasta se não existir
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 db.init_app(app)
 
@@ -137,15 +147,37 @@ def dashboard():
 @app.route('/cadastro', methods=['GET', 'POST'])
 @login_required
 def cadastro():
-    # Se o método for POST, ele tenta salvar no banco
     if request.method == 'POST':
         try:
             cpf_limpo = request.form['cpf'].strip()
+            
+            # --- NOVO TRATAMENTO DA FOTO (CORTADA) ---
+            foto_b64 = request.form.get('foto_base64')
+            nome_arquivo = None
+
+            if foto_b64:
+                # O formato do Base64 vindo do HTML é: "data:image/jpeg;base64,/9j/4AAQSkZJ..."
+                # Precisamos separar o cabeçalho descritivo do dado real
+                header, encoded = foto_b64.split(",", 1)
+                extensao = "png" if "image/png" in header else "jpg"
+                
+                # Cria um nome seguro: ex "00001_perfil.jpg"
+                nome_arquivo = secure_filename(f"{request.form['matricula']}_perfil.{extensao}")
+                caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
+                
+                # Descompacta o texto e salva como uma imagem física no servidor
+                with open(caminho_salvar, "wb") as fh:
+                    fh.write(base64.b64decode(encoded))
+            # ----------------------------------------
+
             novo_associado = Associado(
                 nome=request.form['nome'],
                 matricula=request.form['matricula'],
                 rg=request.form['rg'],
                 cpf=cpf_limpo,
+                telefone=request.form.get('telefone', ''),
+                telefone_whatsapp=request.form.get('telefone_whatsapp', ''),
+                foto_perfil=nome_arquivo, # Salva o nome da imagem gerada
                 endereco=request.form['endereco'],
                 data_nascimento=datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date(),
                 email=request.form['email'],
@@ -161,7 +193,6 @@ def cadastro():
             
         return redirect(url_for('cadastro'))
 
-    # Se for GET (apenas acessar a página), ele mostra o formulário
     return render_template('cadastro.html', username=session.get('username'))
 
 @app.route('/buscar', methods=['GET', 'POST'])
@@ -227,7 +258,7 @@ def exportar_pdf():
     html_renderizado = render_template('pdf_relatorio.html', resultados=resultados, now=data_geracao)
     
     # O WeasyPrint transforma o HTML em PDF
-    pdf = HTML(string=html_renderizado).write_pdf()
+    pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
     # Prepara o arquivo para ser baixado pelo navegador
     response = make_response(pdf)
@@ -260,7 +291,7 @@ def exportar_ficha(matricula):
     )
     
     # O WeasyPrint transforma em PDF
-    pdf = HTML(string=html_renderizado).write_pdf()
+    pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
     # Prepara o arquivo para ser visualizado no navegador
     response = make_response(pdf)
@@ -274,34 +305,38 @@ def exportar_ficha(matricula):
 @app.route('/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 def editar(id):
-    # Busca o associado no banco pela ID única dele
     associado = Associado.query.get_or_404(id)
 
     if request.method == 'POST':
         try:
-            # Puxa os dados novos digitados no formulário
             associado.nome = request.form['nome']
             associado.matricula = request.form['matricula']
             associado.rg = request.form['rg']
-            associado.cpf = request.form['cpf'].strip() # Já aplicando a nossa regra de limpeza
+            associado.cpf = request.form['cpf'].strip()
+            associado.telefone = request.form.get('telefone', '')
+            associado.telefone_whatsapp = request.form.get('telefone_whatsapp', '')
             associado.endereco = request.form['endereco']
             associado.data_nascimento = datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date()
             associado.email = request.form['email']
             associado.data_admissao = datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date()
             associado.dependentes = request.form.get('dependentes', '')
 
-            # Salva no banco de dados
+            # SE O USUÁRIO ENVIOU UMA NOVA FOTO
+            foto = request.files.get('foto_perfil')
+            if foto and allowed_file(foto.filename):
+                nome_arquivo = secure_filename(f"{associado.matricula}_{foto.filename}")
+                caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
+                foto.save(caminho_salvar)
+                associado.foto_perfil = nome_arquivo
+
             db.session.commit()
             flash('Cadastro atualizado com sucesso!', 'success')
-            
-            # Redireciona de volta para a busca para você ver o resultado
             return redirect(url_for('buscar'))
             
         except Exception as e:
             db.session.rollback()
             flash('Erro ao atualizar. Verifique se o novo CPF ou Matrícula já existem no sistema.', 'danger')
 
-    # Se for GET (quando você clica no botão "Editar" na tabela), ele abre a tela
     return render_template('editar.html', username=session.get('username'), associado=associado)
 
 @app.route('/excluir/<int:id>')

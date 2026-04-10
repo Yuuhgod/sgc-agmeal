@@ -30,6 +30,9 @@ class Associado(db.Model):
     matricula = db.Column(db.String(20), unique=True, nullable=False)
     rg = db.Column(db.String(20), nullable=False)
     cpf = db.Column(db.String(14), unique=True, nullable=False)
+    telefone = db.Column(db.String(15), nullable=True)
+    telefone_whatsapp = db.Column(db.String(15), nullable=True)
+    foto_perfil = db.Column(db.String(255), nullable=True) # Guarda o nome da imagem salva
     endereco = db.Column(db.Text, nullable=False)
     data_nascimento = db.Column(db.Date, nullable=False)
     email = db.Column(db.String(100), nullable=False)

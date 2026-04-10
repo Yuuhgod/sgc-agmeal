@@ -6,7 +6,12 @@ services:
     container_name: sgc-agmeal-web
     restart: unless-stopped
     volumes:
+      # Mantém o banco de dados a salvo
       - ./data:/sgc/data
+      
+      # NOVO: Mantém as fotos de perfil a salvo!
+      # Cria uma pasta 'uploads' no seu projeto local e liga ela à pasta do container
+      - ./uploads:/sgc/app/static/uploads/fotos
     environment:
       - TZ=America/Maceio
 
