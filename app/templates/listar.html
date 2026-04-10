@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Lista de Associados{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3" style="color: var(--agmeal-azul);">
+        <span><i class="fa-solid fa-users me-2"></i>Todos os Associados (Ordem Alfabética)</span>
+        
+        {% if associados|length > 0 %}
+        <a href="/exportar_lista_simples" target="_blank" class="btn btn-sm btn-ouro">
+            <i class="fa-solid fa-file-pdf me-2"></i>Exportar Lista Simples
+        </a>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead style="background-color: var(--agmeal-azul); color: white;">
+                    <tr>
+                        <th class="ps-4">Nome Completo</th>
+                        <th>Matrícula</th>
+                        <th>Telefone Principal</th>
+                        <th class="text-center pe-4">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pessoa in associados %}
+                    <tr>
+                        <td class="ps-4"><strong>{{ pessoa.nome }}</strong></td>
+                        <td>{{ pessoa.matricula }}</td>
+                        <td>{{ pessoa.telefone or pessoa.telefone_whatsapp or 'Não informado' }}</td>
+                        <td class="text-center pe-4">
+                            <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="fa-solid fa-pen"></i></a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            <i class="fa-solid fa-users-slash fa-3x mb-3 opacity-25"></i><br>
+                            Nenhum associado cadastrado ainda.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

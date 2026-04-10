@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>Relatório AGMEAL</title>
     <style>
-        /* Configuração da Folha A4 - Margem reduzida para ganhar espaço */
         @page {
             size: A4;
             margin: 1cm; 
@@ -28,13 +27,12 @@
         
         .linha-divisoria {
             border-top: 2px dashed #ccc; 
-            margin: 15px 0; /* Margem da divisória reduzida */
+            margin: 15px 0; 
         }
 
-        /* Fontes e margens mais compactas */
         .campo {
             margin-bottom: 2px;
-            font-size: 12px; /* Fonte ligeiramente menor */
+            font-size: 12px; 
         }
 
         .campo strong {
@@ -48,7 +46,7 @@
         }
         
         .tabela-dados td {
-            padding: 4px 8px; /* Espaço em branco dentro das células cortado pela metade */
+            padding: 4px 8px; 
             border-bottom: 1px solid #eee;
         }
 
@@ -72,15 +70,24 @@
         
         <table width="100%" style="margin-bottom: 8px; border-bottom: 3px solid #0A2342; padding-bottom: 5px;">
             <tr>
-                <td style="text-align: left; vertical-align: bottom;">
-                    <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
-                    <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Ficha de Registro Funcional</h3>
+                <td style="text-align: left; vertical-align: middle;">
+                    <table style="border: none; padding: 0; margin: 0; width: auto;">
+                        <tr>
+                            <td style="padding: 0; padding-right: 12px; border: none; vertical-align: middle;">
+                                <img src="file:///sgc/app/static/img/logo.jpeg" style="width: 50px; height: 50px; display: block;">
+                            </td>
+                            <td style="padding: 0; border: none; vertical-align: middle;">
+                                <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
+                                <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Ficha de Registro Funcional</h3>
+                            </td>
+                        </tr>
+                    </table>
                 </td>
                 <td style="text-align: right; width: 3.5cm; vertical-align: bottom;">
                     {% if pessoa.foto_perfil %}
-                        <img src="{{ url_for('static', filename='uploads/fotos/' ~ pessoa.foto_perfil) }}" style="width: 2.6cm; height: 3.5cm; object-fit: cover; border: 1px solid #0A2342; border-radius: 4px; display: block; margin-left: auto;">
+                        <img src="file:///sgc/app/static/uploads/fotos/{{ pessoa.foto_perfil }}" style="width: 2.1cm; height: 2.8cm; object-fit: cover; border: 1px solid #0A2342; display: block; margin-left: auto;">
                     {% else %}
-                        <table style="width: 2.6cm; height: 3.5cm; border: 1px dashed #999; margin-left: auto; border-collapse: collapse;">
+                        <table style="width: 2.1cm; height: 2.8cm; border: 1px solid #999; margin-left: auto; border-collapse: collapse; background-color: #fcfcfc;">
                             <tr>
                                 <td style="text-align: center; vertical-align: middle; font-size: 10px; color: #999; padding: 0;">Sem Foto</td>
                             </tr>

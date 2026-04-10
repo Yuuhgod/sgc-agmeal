@@ -13,9 +13,11 @@
 <body>
     <div class="card setup-card shadow">
         <div class="card-body p-5">
-            <h3 class="text-center mb-3" style="color: var(--agmeal-azul);">Bem-vindo ao SGC</h3>
-            <p class="text-center text-muted mb-4">Esta é a primeira execução do sistema. Por favor, crie a conta de Administrador principal.</p>
-
+            <div class="text-center mb-4">
+                <img src="{{ url_for('static', filename='img/logo.jpeg') }}" alt="Logo AGMEAL" style="height: 110px; margin-bottom: 15px; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+                <h3 style="color: var(--agmeal-azul);">Bem-vindo ao SGC</h3>
+                <p class="text-muted">Esta é a primeira execução do sistema. Por favor, crie a conta de Administrador principal.</p>
+            </div>
             <form action="{{ url_for('setup') }}" method="POST">
                 <div class="mb-3">
                     <label class="form-label fw-bold">Nome de Usuário</label>

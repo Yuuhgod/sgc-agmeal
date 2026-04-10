@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Lista de Associados</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 2cm;
+            @bottom-right {
+                content: "Página " counter(page) " de " counter(pages);
+                font-family: Arial, sans-serif;
+                font-size: 10px;
+                color: #777;
+            }
+        }
+        body {
+            font-family: Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .cabecalho {
+            text-align: center;
+            border-bottom: 3px solid #0A2342;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background-color: #0A2342;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+        }
+        td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="cabecalho">
+        <table style="border: none; margin: 0 auto; padding: 0; width: auto;">
+            <tr>
+                <td style="border: none; padding: 0; padding-right: 15px; vertical-align: middle;">
+                <img src="file:///sgc/app/static/img/logo.jpeg" style="width: 55px; height: 55px; display: block;">                </td>
+                <td style="border: none; text-align: left; vertical-align: middle; padding: 0;">
+                    <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
+                    <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Lista Geral de Associados</h3>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 10%;">#</th>
+                <th style="width: 65%;">Nome Completo</th>
+                <th style="width: 25%;">Matrícula</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pessoa in associados %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ pessoa.nome }}</td>
+                <td>{{ pessoa.matricula }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="text-align: right; margin-top: 20px; font-size: 10px; color: #777;">
+        Gerado em {{ now }}
+    </div>
+
+</body>
+</html>

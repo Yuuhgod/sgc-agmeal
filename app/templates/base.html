@@ -11,27 +11,36 @@
 </head>
 <body>
 
-    <nav class="navbar navbar-expand-lg navbar-agmeal shadow-sm">
+<nav class="navbar navbar-expand-lg navbar-agmeal shadow-sm" data-bs-theme="dark">
         <div class="container">
-            <a class="navbar-brand" href="/">SGC - AGMEAL</a>
+            <a class="navbar-brand d-flex align-items-center" href="/">
+                <img src="{{ url_for('static', filename='img/logo.jpeg') }}" alt="Logo AGMEAL" style="height: 40px; margin-right: 12px; border-radius: 50%;">
+                SGC - AGMEAL
+            </a>
             
-            <div class="navbar-nav ms-auto align-items-center">
-                <a class="nav-link" href="/">Início</a>
-                <a class="nav-link" href="/cadastro">Cadastrar</a>
-                <a class="nav-link" href="/buscar">Buscar</a>
-                
-                <div class="dropdown ms-3">
-                    <a href="#" class="nav-link dropdown-toggle text-light d-flex align-items-center" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="fa-solid fa-circle-user fa-lg me-2" style="color: var(--agmeal-ouro);"></i> 
-                        <span class="text-capitalize">{{ username }}</span>
-                    </a>
-                    <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><h6 class="dropdown-header text-muted">Acesso de Administrador</h6></li>
-                        <li><a class="dropdown-item" href="/perfil"><i class="fa-solid fa-user-gear me-2 text-primary"></i> Editar Meu Perfil</a></li>
-                        <li><a class="dropdown-item" href="/seguranca"><i class="fa-solid fa-key me-2 text-warning"></i> Alterar Frase de Segurança</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="/logout"><i class="fa-solid fa-door-open me-2"></i> Encerrar Sessão</a></li>
-                    </ul>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menuPrincipal" aria-controls="menuPrincipal" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="menuPrincipal">
+                <div class="navbar-nav ms-auto align-items-center mt-3 mt-lg-0 text-center">
+                    <a class="nav-link" href="/">Início</a>
+                    <a class="nav-link" href="/cadastro">Cadastrar</a>
+                    <a class="nav-link" href="/buscar">Buscar</a>
+                    
+                    <div class="dropdown ms-lg-3 mt-3 mt-lg-0 mb-3 mb-lg-0">
+                        <a href="#" class="nav-link dropdown-toggle text-light d-flex align-items-center justify-content-center" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fa-solid fa-circle-user fa-lg me-2" style="color: var(--agmeal-ouro);"></i> 
+                            <span class="text-capitalize">{{ username }}</span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end shadow text-center text-lg-start">
+                            <li><h6 class="dropdown-header text-muted">Acesso de Administrador</h6></li>
+                            <li><a class="dropdown-item" href="/perfil"><i class="fa-solid fa-user-gear me-2 text-primary"></i> Editar Meu Perfil</a></li>
+                            <li><a class="dropdown-item" href="/seguranca"><i class="fa-solid fa-key me-2 text-warning"></i> Alterar Frase de Segurança</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger" href="/logout"><i class="fa-solid fa-door-open me-2"></i> Encerrar Sessão</a></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>

@@ -21,18 +21,18 @@ class Usuario(db.Model):
     def check_senha(self, senha):
         return check_password_hash(self.senha_hash, senha)
 
-# Tabela de Associados (já existia)
+# Tabela de Associados
 class Associado(db.Model):
     __tablename__ = 'associados'
 
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), nullable=False)
     matricula = db.Column(db.String(20), unique=True, nullable=False)
-    rg = db.Column(db.String(20), nullable=False)
+    rg = db.Column(db.String(10), nullable=False) # <--- ALTERADO DE 20 PARA 10
     cpf = db.Column(db.String(14), unique=True, nullable=False)
     telefone = db.Column(db.String(15), nullable=True)
     telefone_whatsapp = db.Column(db.String(15), nullable=True)
-    foto_perfil = db.Column(db.String(255), nullable=True) # Guarda o nome da imagem salva
+    foto_perfil = db.Column(db.String(255), nullable=True)
     endereco = db.Column(db.Text, nullable=False)
     data_nascimento = db.Column(db.Date, nullable=False)
     email = db.Column(db.String(100), nullable=False)
