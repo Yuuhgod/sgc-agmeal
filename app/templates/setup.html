@@ -52,6 +52,7 @@
                     </p>
                 </div>
                 <form action="{{ url_for('setup') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <div class="mb-3">
                         <label class="form-label fw-bold"
                             >Nome de Usuário</label

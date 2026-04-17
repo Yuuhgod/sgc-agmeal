@@ -15,6 +15,10 @@ data/sgc.db
 
 # Variáveis de Ambiente e Segredos
 .env
+data/.flask_secret
+
+# Uploads locais (pode conter fotos/dados pessoais)
+uploads/
 
 # Sistema Operacional
 .DS_Store

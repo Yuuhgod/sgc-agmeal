@@ -11,6 +11,7 @@
             </div>
             <div class="card-body">
                 <form action="/perfil" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <div class="mb-3">
                         <label class="form-label fw-bold">Nome de Usuário (Login)</label>
                         <input type="text" class="form-control" name="username" value="{{ usuario.username }}" required>

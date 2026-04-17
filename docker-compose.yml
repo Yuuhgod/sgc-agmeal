@@ -14,6 +14,8 @@ services:
       - ./uploads:/sgc/app/static/uploads/fotos
     environment:
       - TZ=America/Maceio
+      - FLASK_HOST=0.0.0.0
+      - FLASK_DEBUG=false
 
   nginx:
     image: nginx:alpine

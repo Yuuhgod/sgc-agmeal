@@ -1,25 +1,51 @@
+import base64
+import binascii
 import os
 import re
+import secrets
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, session
-import base64
 from database import db, Associado, Usuario
 from sqlalchemy import extract
 from flask import make_response
 from weasyprint import HTML
 from werkzeug.utils import secure_filename
+from flask_wtf.csrf import CSRFProtect
 
 app = Flask(__name__)
-app.secret_key = "agmeal_secreta_2026"
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 data_dir = os.path.join(basedir, '..', 'data')
 os.makedirs(data_dir, exist_ok=True)
 
+
+def _carregar_secret_key():
+    env = os.environ.get('SECRET_KEY') or os.environ.get('FLASK_SECRET_KEY')
+    if env:
+        return env
+    path = os.path.join(data_dir, '.flask_secret')
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as fh:
+            return fh.read().strip()
+    key = secrets.token_urlsafe(48)
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write(key)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return key
+
+
+app.config['SECRET_KEY'] = _carregar_secret_key()
+app.config['WTF_CSRF_TIME_LIMIT'] = None
+
 db_path = os.path.join(data_dir, 'sgc.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+csrf = CSRFProtect(app)
 
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads', 'fotos')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -28,6 +54,14 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _bytes_sao_imagem_png_ou_jpeg(data):
+    if not data or len(data) < 8:
+        return False
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return True
+    return data.startswith(b'\xff\xd8\xff')
 
 db.init_app(app)
 
@@ -94,8 +128,9 @@ def setup():
         senha = request.form['senha']
         palavra = request.form['palavra_recuperacao']
 
-        novo_admin = Usuario(username=username, palavra_recuperacao=palavra)
+        novo_admin = Usuario(username=username)
         novo_admin.set_senha(senha)
+        novo_admin.set_palavra_recuperacao(palavra)
 
         db.session.add(novo_admin)
         db.session.commit()
@@ -117,6 +152,7 @@ def login():
         usuario = Usuario.query.filter_by(username=username).first()
 
         if usuario and usuario.check_senha(senha):
+            session.clear()
             session['usuario_id'] = usuario.id
             session['username'] = usuario.username
             return redirect(url_for('dashboard'))
@@ -139,7 +175,8 @@ def esqueci_senha():
 
         usuario = Usuario.query.filter_by(username=username).first()
 
-        if usuario and usuario.palavra_recuperacao == palavra:
+        if usuario and usuario.verificar_palavra_recuperacao(palavra):
+            usuario.migrar_palavra_recuperacao_se_legado(palavra)
             if usuario.check_senha(nova_senha):
                 flash('A nova senha não pode ser igual à senha atual.', 'warning')
                 return redirect(url_for('esqueci_senha'))
@@ -177,13 +214,24 @@ def cadastro():
             nome_arquivo = None
 
             if foto_b64:
-                header, encoded = foto_b64.split(",", 1)
+                try:
+                    header, encoded = foto_b64.split(",", 1)
+                    raw_foto = base64.b64decode(encoded, validate=True)
+                except (ValueError, binascii.Error):
+                    flash('Dados de foto inválidos.', 'danger')
+                    return render_template('cadastro.html', username=session.get('username'))
                 extensao = "png" if "image/png" in header else "jpg"
+                if len(raw_foto) > 6 * 1024 * 1024:
+                    flash('A foto é muito grande (máximo 6 MB).', 'danger')
+                    return render_template('cadastro.html', username=session.get('username'))
+                if not _bytes_sao_imagem_png_ou_jpeg(raw_foto):
+                    flash('Arquivo de foto inválido. Use apenas PNG ou JPEG.', 'danger')
+                    return render_template('cadastro.html', username=session.get('username'))
                 nome_arquivo = secure_filename(f"{request.form['matricula']}_perfil.{extensao}")
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
 
                 with open(caminho_salvar, "wb") as fh:
-                    fh.write(base64.b64decode(encoded))
+                    fh.write(raw_foto)
 
             novo_associado = Associado(
                 nome=request.form['nome'],
@@ -231,7 +279,10 @@ def buscar():
         if matricula_busca:
             query = query.filter(Associado.matricula == matricula_busca)
         if ano_busca:
-            query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+            try:
+                query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+            except ValueError:
+                flash('Ano de admissão inválido.', 'warning')
 
         resultados = query.all()
 
@@ -254,7 +305,11 @@ def exportar_pdf():
     if matricula_busca:
         query = query.filter(Associado.matricula == matricula_busca)
     if ano_busca:
-        query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+        try:
+            query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+        except ValueError:
+            flash('Ano de admissão inválido.', 'warning')
+            return redirect(url_for('buscar'))
 
     resultados = query.all()
 
@@ -326,10 +381,18 @@ def editar(id):
             associado.dependentes = request.form.get('dependentes', '')
 
             foto = request.files.get('foto_perfil')
-            if foto and allowed_file(foto.filename):
+            if foto and foto.filename and allowed_file(foto.filename):
+                dados_foto = foto.read()
+                if len(dados_foto) > 6 * 1024 * 1024:
+                    flash('A foto é muito grande (máximo 6 MB).', 'danger')
+                    return redirect(url_for('editar', id=id))
+                if not _bytes_sao_imagem_png_ou_jpeg(dados_foto):
+                    flash('Arquivo de foto inválido. Use apenas PNG ou JPEG.', 'danger')
+                    return redirect(url_for('editar', id=id))
                 nome_arquivo = secure_filename(f"{associado.matricula}_{foto.filename}")
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
-                foto.save(caminho_salvar)
+                with open(caminho_salvar, 'wb') as fh:
+                    fh.write(dados_foto)
                 associado.foto_perfil = nome_arquivo
 
             db.session.commit()
@@ -342,7 +405,7 @@ def editar(id):
 
     return render_template('editar.html', username=session.get('username'), associado=associado)
 
-@app.route('/excluir/<int:id>')
+@app.route('/excluir/<int:id>', methods=['POST'])
 @login_required
 def excluir(id):
     associado = Associado.query.get_or_404(id)
@@ -405,7 +468,7 @@ def seguranca():
             flash('Senha atual incorreta.', 'danger')
             return redirect(url_for('seguranca'))
 
-        usuario.palavra_recuperacao = nova_palavra
+        usuario.set_palavra_recuperacao(nova_palavra)
         db.session.commit()
         flash('Frase de segurança atualizada com sucesso!', 'success')
         return redirect(url_for('dashboard'))
@@ -418,7 +481,7 @@ def listar_todos():
     associados = Associado.query.order_by(Associado.nome).all()
     return render_template('listar.html', username=session.get('username'), associados=associados)
 
-@app.route('/exportar_lista_simples', methods=['POST', 'GET'])
+@app.route('/exportar_lista_simples', methods=['POST'])
 @login_required
 def exportar_lista_simples():
     associados = Associado.query.order_by(Associado.nome).all()
@@ -435,4 +498,7 @@ def exportar_lista_simples():
     return response
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    _debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    _host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    _port = int(os.environ.get('FLASK_PORT', '5000'))
+    app.run(debug=_debug, host=_host, port=_port)

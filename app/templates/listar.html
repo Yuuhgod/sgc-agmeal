@@ -8,9 +8,12 @@
         <span><i class="fa-solid fa-users me-2"></i>Todos os Associados (Ordem Alfabética)</span>
         
         {% if associados|length > 0 %}
-        <a href="/exportar_lista_simples" target="_blank" class="btn btn-sm btn-ouro">
-            <i class="fa-solid fa-file-pdf me-2"></i>Exportar Lista Simples
-        </a>
+        <form action="{{ url_for('exportar_lista_simples') }}" method="POST" target="_blank" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button type="submit" class="btn btn-sm btn-ouro">
+                <i class="fa-solid fa-file-pdf me-2"></i>Exportar Lista Simples
+            </button>
+        </form>
         {% endif %}
     </div>
     <div class="card-body p-0">

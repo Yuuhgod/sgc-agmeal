@@ -12,6 +12,7 @@
             </div>
             <div class="card-body">
                 <form action="/seguranca" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <div class="mb-4">
                         <label class="form-label fw-bold">Nova Frase de Segurança</label>
                         <input type="password" class="form-control" name="nova_palavra" placeholder="Digite uma nova frase marcante..." required>

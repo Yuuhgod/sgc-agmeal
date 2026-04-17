@@ -25,6 +25,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia o restante do código do projeto para dentro do container
 COPY . .
 
+ENV FLASK_HOST=0.0.0.0
+ENV FLASK_DEBUG=false
+
 # Expõe a porta que o Flask vai usar
 EXPOSE 5000
 

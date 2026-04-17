@@ -12,6 +12,7 @@ block content %}
     </div>
     <div class="card-body">
         <form action="/cadastro" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             {% set foto_salva = request.form.get('foto_base64', '') %}
 
             <div class="row mb-4 bg-light p-3 rounded align-items-center">

@@ -12,14 +12,31 @@ class Usuario(db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     senha_hash = db.Column(db.String(256), nullable=False)
     
-    # NOVO CAMPO: Frase secreta para recuperar a conta
-    palavra_recuperacao = db.Column(db.String(100), nullable=False)
+    # Frase de recuperação (hash; legado pode estar em texto plano até o próximo login/recuperação)
+    palavra_recuperacao = db.Column(db.String(256), nullable=False)
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha)
 
     def check_senha(self, senha):
         return check_password_hash(self.senha_hash, senha)
+
+    def set_palavra_recuperacao(self, palavra):
+        self.palavra_recuperacao = generate_password_hash(palavra)
+
+    def _palavra_recuperacao_eh_hash(self):
+        s = self.palavra_recuperacao or ''
+        return s.startswith('pbkdf2:') or s.startswith('scrypt:')
+
+    def verificar_palavra_recuperacao(self, palavra):
+        if self._palavra_recuperacao_eh_hash():
+            return check_password_hash(self.palavra_recuperacao, palavra)
+        return self.palavra_recuperacao == palavra
+
+    def migrar_palavra_recuperacao_se_legado(self, palavra_plain):
+        if palavra_plain and not self._palavra_recuperacao_eh_hash():
+            if self.palavra_recuperacao == palavra_plain:
+                self.set_palavra_recuperacao(palavra_plain)
 
 # Tabela de Associados
 class Associado(db.Model):

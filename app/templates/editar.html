@@ -10,7 +10,7 @@
     </div>
     <div class="card-body">
         <form action="/editar/{{ associado.id }}" method="POST" enctype="multipart/form-data">
-            
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <div class="row mb-4 bg-light p-3 rounded align-items-center">
                 <div class="col-md-2 text-center">
                     {% if associado.foto_perfil %}
