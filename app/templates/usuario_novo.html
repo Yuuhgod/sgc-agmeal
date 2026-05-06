@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Novo Usuário{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-3">
+    <div class="col-md-7">
+        <div class="card shadow-sm border-0 border-top border-primary border-3">
+            <div class="card-header bg-white pb-0 border-0 pt-4 d-flex justify-content-between align-items-center">
+                <h4 class="mb-0" style="color: var(--agmeal-azul);">
+                    <i class="fa-solid fa-user-plus me-2"></i>Novo Usuário do Sistema
+                </h4>
+                <a href="{{ url_for('listar_usuarios') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="fa-solid fa-arrow-left me-1"></i>Voltar
+                </a>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('criar_usuario') }}" method="POST" autocomplete="off">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nome de Usuário (Login) *</label>
+                        <input type="text" class="form-control" name="username"
+                               value="{{ request.form.get('username', '') }}"
+                               maxlength="50" required autocomplete="off">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Senha * <small class="text-muted fw-normal">(mín. 8 caracteres)</small></label>
+                            <input type="password" class="form-control" name="senha" minlength="8" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Palavra de Recuperação *</label>
+                            <input type="password" class="form-control" name="palavra_recuperacao"
+                                   placeholder="Frase para recuperar a senha" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold d-block">Perfil de Acesso *</label>
+
+                        <div class="form-check form-check-inline border rounded p-3 me-2 mb-2" style="min-width: 220px;">
+                            <input class="form-check-input" type="radio" name="role" id="role_usuario" value="usuario"
+                                   {% if request.form.get('role', 'usuario') == 'usuario' %}checked{% endif %}>
+                            <label class="form-check-label ms-1" for="role_usuario">
+                                <i class="fa-solid fa-user me-1 text-secondary"></i>
+                                <strong>Usuário</strong><br>
+                                <small class="text-muted">Acesso padrão ao sistema.</small>
+                            </label>
+                        </div>
+
+                        <div class="form-check form-check-inline border rounded p-3 mb-2" style="min-width: 220px;">
+                            <input class="form-check-input" type="radio" name="role" id="role_admin" value="admin"
+                                   {% if request.form.get('role') == 'admin' %}checked{% endif %}>
+                            <label class="form-check-label ms-1" for="role_admin">
+                                <i class="fa-solid fa-user-shield me-1" style="color: var(--agmeal-ouro);"></i>
+                                <strong>Administrador</strong><br>
+                                <small class="text-muted">Pode gerenciar outros usuários.</small>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                        <a href="{{ url_for('listar_usuarios') }}" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-primary-agmeal px-4 fw-bold">
+                            <i class="fa-solid fa-save me-2"></i>Criar Usuário
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

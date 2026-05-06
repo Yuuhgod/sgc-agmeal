@@ -1,21 +1,27 @@
-version: '3.8'
-
 services:
   agmeal-app:
     build: .
     container_name: sgc-agmeal-web
     restart: unless-stopped
+    expose:
+      - "5000"
     volumes:
-      # Mantém o banco de dados a salvo
       - ./data:/sgc/data
-      
-      # NOVO: Mantém as fotos de perfil a salvo!
-      # Cria uma pasta 'uploads' no seu projeto local e liga ela à pasta do container
       - ./uploads:/sgc/app/static/uploads/fotos
     environment:
       - TZ=America/Maceio
       - FLASK_HOST=0.0.0.0
       - FLASK_DEBUG=false
+      - GUNICORN_WORKERS=3
+      - GUNICORN_TIMEOUT=60
+      # Defina SECRET_KEY em um arquivo .env para n\u00e3o depender do .flask_secret no host.
+      # - SECRET_KEY=${SECRET_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   nginx:
     image: nginx:alpine
@@ -26,4 +32,5 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - agmeal-app
+      agmeal-app:
+        condition: service_healthy

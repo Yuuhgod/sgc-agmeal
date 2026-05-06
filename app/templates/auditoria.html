@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Trilha de Auditoria{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header card-header-agmeal">
+        <i class="fa-solid fa-clock-rotate-left me-2"></i>Filtros
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('auditoria') }}" method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label fw-bold small text-muted">Usuário</label>
+                <input type="text" class="form-control form-control-sm" name="usuario"
+                       list="lista_usuarios" value="{{ filtros.usuario }}" placeholder="Qualquer">
+                <datalist id="lista_usuarios">
+                    {% for u in usuarios_distintos %}<option value="{{ u }}">{% endfor %}
+                </datalist>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold small text-muted">Ação</label>
+                <select class="form-select form-select-sm" name="acao">
+                    <option value="">Todas</option>
+                    {% for codigo, rotulo in acoes.items() %}
+                        <option value="{{ codigo }}" {% if filtros.acao == codigo %}selected{% endif %}>{{ rotulo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold small text-muted">Entidade</label>
+                <select class="form-select form-select-sm" name="entidade">
+                    <option value="">Todas</option>
+                    <option value="associado" {% if filtros.entidade == 'associado' %}selected{% endif %}>Associado</option>
+                    <option value="usuario" {% if filtros.entidade == 'usuario' %}selected{% endif %}>Usuário</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold small text-muted">De</label>
+                <input type="date" class="form-control form-control-sm" name="data_de" value="{{ filtros.data_de }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold small text-muted">Até</label>
+                <input type="date" class="form-control form-control-sm" name="data_ate" value="{{ filtros.data_ate }}">
+            </div>
+            <div class="col-12 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary-agmeal fw-bold">
+                    <i class="fa-solid fa-filter me-1"></i>Filtrar
+                </button>
+                <a href="{{ url_for('auditoria') }}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white fw-bold py-3" style="color: var(--agmeal-azul);">
+        <i class="fa-solid fa-list-check me-2"></i>Eventos
+        <span class="text-muted fw-normal small">
+            ({{ paginacao.total }} {{ 'registro' if paginacao.total == 1 else 'registros' }})
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead style="background-color: var(--agmeal-azul); color: white;">
+                    <tr>
+                        <th class="ps-4" style="width: 160px;">Data/Hora</th>
+                        <th style="width: 140px;">Usuário</th>
+                        <th style="width: 220px;">Ação</th>
+                        <th>Detalhes</th>
+                        <th class="pe-4" style="width: 130px;">IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in registros %}
+                    <tr>
+                        <td class="ps-4 small">
+                            {{ r.data_hora.strftime('%d/%m/%Y %H:%M:%S') }}
+                        </td>
+                        <td>
+                            <strong class="text-capitalize">{{ r.usuario_username }}</strong>
+                        </td>
+                        <td>
+                            {% set categoria = r.acao.split('.')[0] %}
+                            {% if categoria == 'associado' %}
+                                <span class="badge bg-primary"><i class="fa-solid fa-id-card me-1"></i>{{ r.rotulo }}</span>
+                            {% elif categoria == 'usuario' %}
+                                <span class="badge" style="background-color: var(--agmeal-ouro); color: #000;"><i class="fa-solid fa-user-shield me-1"></i>{{ r.rotulo }}</span>
+                            {% elif r.acao == 'auth.login' %}
+                                <span class="badge bg-success"><i class="fa-solid fa-right-to-bracket me-1"></i>{{ r.rotulo }}</span>
+                            {% elif r.acao == 'auth.logout' %}
+                                <span class="badge bg-secondary"><i class="fa-solid fa-right-from-bracket me-1"></i>{{ r.rotulo }}</span>
+                            {% elif r.acao == 'auth.login_falhou' %}
+                                <span class="badge bg-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>{{ r.rotulo }}</span>
+                            {% else %}
+                                <span class="badge bg-dark">{{ r.rotulo }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div>{{ r.descricao or '—' }}</div>
+                            {% if r.detalhes %}
+                            <details class="mt-1">
+                                <summary class="text-muted small" style="cursor: pointer;">Ver alterações</summary>
+                                <pre class="bg-light p-2 mt-1 mb-0 small rounded" style="white-space: pre-wrap; font-size: 11px;">{{ r.detalhes }}</pre>
+                            </details>
+                            {% endif %}
+                        </td>
+                        <td class="pe-4 small text-muted font-monospace">{{ r.ip_origem or '—' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted">
+                            <i class="fa-solid fa-inbox fa-3x mb-3 opacity-25"></i><br>
+                            Nenhum evento encontrado com estes filtros.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if paginacao and paginacao.pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <small class="text-muted">
+            Página {{ paginacao.page }} de {{ paginacao.pages }}
+        </small>
+        <nav aria-label="Paginação">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('auditoria', page=paginacao.prev_num, **filtros) if paginacao.has_prev else '#' }}">Anterior</a>
+                </li>
+                {% for p in paginacao.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {% if p == paginacao.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('auditoria', page=p, **filtros) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('auditoria', page=paginacao.next_num, **filtros) if paginacao.has_next else '#' }}">Próxima</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

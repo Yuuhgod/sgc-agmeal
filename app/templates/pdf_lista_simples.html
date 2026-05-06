@@ -53,7 +53,8 @@
         <table style="border: none; margin: 0 auto; padding: 0; width: auto;">
             <tr>
                 <td style="border: none; padding: 0; padding-right: 15px; vertical-align: middle;">
-                <img src="file:///sgc/app/static/img/logo.jpeg" style="width: 55px; height: 55px; display: block;">                </td>
+                    <img src="{{ url_for('static', filename='img/logo.jpeg') }}" style="width: 55px; height: 55px; display: block;">
+                </td>
                 <td style="border: none; text-align: left; vertical-align: middle; padding: 0;">
                     <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
                     <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Lista Geral de Associados</h3>

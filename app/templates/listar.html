@@ -6,8 +6,8 @@
 <div class="card shadow-sm border-0 mb-4">
     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3" style="color: var(--agmeal-azul);">
         <span><i class="fa-solid fa-users me-2"></i>Todos os Associados (Ordem Alfabética)</span>
-        
-        {% if associados|length > 0 %}
+
+        {% if paginacao and paginacao.total > 0 %}
         <form action="{{ url_for('exportar_lista_simples') }}" method="POST" target="_blank" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button type="submit" class="btn btn-sm btn-ouro">
@@ -34,7 +34,7 @@
                         <td>{{ pessoa.matricula }}</td>
                         <td>{{ pessoa.telefone or pessoa.telefone_whatsapp or 'Não informado' }}</td>
                         <td class="text-center pe-4">
-                            <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-outline-primary" title="Editar"><i class="fa-solid fa-pen"></i></a>
+                            <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-outline-primary" title="Editar" aria-label="Editar associado"><i class="fa-solid fa-pen"></i></a>
                         </td>
                     </tr>
                     {% else %}
@@ -49,5 +49,33 @@
             </table>
         </div>
     </div>
+
+    {% if paginacao and paginacao.pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <small class="text-muted">
+            Mostrando {{ associados|length }} de {{ paginacao.total }} registros
+            (página {{ paginacao.page }} de {{ paginacao.pages }})
+        </small>
+        <nav aria-label="Paginação">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.prev_num) if paginacao.has_prev else '#' }}">Anterior</a>
+                </li>
+                {% for p in paginacao.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {% if p == paginacao.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('listar_todos', page=p) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.next_num) if paginacao.has_next else '#' }}">Próxima</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

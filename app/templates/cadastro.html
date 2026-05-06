@@ -328,21 +328,5 @@ block content %}
 
         modalCrop.hide();
     });
-
-    // --- MÁSCARAS DE TEXTO ---
-    function mascaraCPF(cpf) {
-        let valor = cpf.value.replace(/\D/g, "");
-        valor = valor.replace(/(\d{3})(\d)/, "$1.$2");
-        valor = valor.replace(/(\d{3})(\d)/, "$1.$2");
-        valor = valor.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-        cpf.value = valor;
-    }
-
-    function mascaraTelefone(tel) {
-        let valor = tel.value.replace(/\D/g, "");
-        valor = valor.replace(/^(\d{2})(\d)/g, "($1) $2");
-        valor = valor.replace(/(\d)(\d{4})$/, "$1-$2");
-        tel.value = valor;
-    }
 </script>
 {% endblock %}

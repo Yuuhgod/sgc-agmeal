@@ -91,20 +91,4 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-    function mascaraCPF(cpf) {
-        let valor = cpf.value.replace(/\D/g, "");
-        valor = valor.replace(/(\d{3})(\d)/, "$1.$2");
-        valor = valor.replace(/(\d{3})(\d)/, "$1.$2");
-        valor = valor.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-        cpf.value = valor;
-    }
-    
-    function mascaraTelefone(tel) {
-        let valor = tel.value.replace(/\D/g, ""); // Remove letras e símbolos
-        valor = valor.replace(/^(\d{2})(\d)/g, "($1) $2"); // Isola o DDD em parênteses
-        valor = valor.replace(/(\d)(\d{4})$/, "$1-$2"); // Adiciona o hífen antes dos 4 últimos dígitos
-        tel.value = valor;
-    }
-</script>
 {% endblock %}

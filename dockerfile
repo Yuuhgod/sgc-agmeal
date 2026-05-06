@@ -1,35 +1,34 @@
-# Usa uma imagem oficial do Python, versão enxuta
 FROM python:3.12-slim
 
-# Define o diretório de trabalho dentro do container
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /sgc
 
-# Instala as dependências do SO necessárias para o WeasyPrint gerar PDFs
-# CORREÇÃO: Pacote libgdk-pixbuf-2.0-0 com a nomenclatura atualizada
-RUN apt-get update && apt-get install -y \
+# Dependências de SO para o WeasyPrint gerar PDFs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-2.0-0 \
     libffi-dev \
     shared-mime-info \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia apenas o arquivo de dependências primeiro (para aproveitar o cache do Docker)
 COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-# Instala as bibliotecas do Python
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copia o restante do código do projeto para dentro do container
 COPY . .
 
-ENV FLASK_HOST=0.0.0.0
-ENV FLASK_DEBUG=false
+ENV FLASK_HOST=0.0.0.0 \
+    FLASK_DEBUG=false \
+    GUNICORN_WORKERS=3 \
+    GUNICORN_TIMEOUT=60
 
-# Expõe a porta que o Flask vai usar
 EXPOSE 5000
 
-# Comando para iniciar o sistema
-CMD ["python", "app/main.py"]
+# Gunicorn como WSGI de produção (substitui o dev server do Flask).
+CMD ["sh", "-c", "gunicorn --chdir app --bind 0.0.0.0:5000 --workers ${GUNICORN_WORKERS} --timeout ${GUNICORN_TIMEOUT} --access-logfile - --error-logfile - main:app"]

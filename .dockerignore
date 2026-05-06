@@ -1,5 +1,25 @@
+.git/
+.gitignore
 .venv/
+venv/
+env/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Nunca enviar dados reais para a imagem.
 data/sgc.db
-.git/
+data/.flask_secret
+*.sqlite3
+uploads/
+
+# Docs e CI não entram na imagem.
+README.md
+docs/
+.github/
+tests/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
