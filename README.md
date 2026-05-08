@@ -19,6 +19,34 @@ Sistema desenvolvido em **Python (Flask + SQLAlchemy)** para a gestão de regist
 
 ## Como Executar
 
+### Opção 1 — Windows (recomendado para uso em PCs comuns)
+
+1. Copie a pasta `sgc-agmeal` para o computador
+2. Duplo clique em **`INSTALAR.bat`** e aceite o pedido de Administrador
+3. O script faz tudo sozinho:
+   - Instala WSL2 + Ubuntu (se necessário)
+   - Copia o projeto e instala todas as dependências
+   - Configura a URL amigável **`http://sgc.local`** (mapeia em `hosts` +
+     redireciona porta 80 → 5000 via `netsh portproxy`)
+   - Cria o atalho **SGC-AGMEAL** na Área de Trabalho (abre direto no navegador)
+   - Configura **auto-start no boot** (script `.vbs` invisível em `shell:startup`)
+4. Para usar: duplo clique em **SGC-AGMEAL** na Área de Trabalho
+
+O servidor passa a iniciar **sozinho** toda vez que o PC ligar — o atalho só
+abre o navegador na URL configurada.
+
+> Na primeira instalação do WSL, o Windows pede para reiniciar o PC. Após
+> reiniciar e criar usuário/senha no Ubuntu (janela que abre sozinha),
+> execute `INSTALAR.bat` novamente para concluir.
+
+#### Atalhos avançados (uso manual / manutenção)
+
+Também são criados na Área de Trabalho:
+- `SGC-Iniciar.bat` — força o início manual do servidor
+- `SGC-Parar.bat` — encerra o servidor
+
+### Opção 2 — Docker (servidor / desenvolvimento)
+
 ```bash
 git clone https://github.com/yuuhgod/sgc-agmeal.git
 cd sgc-agmeal
@@ -26,6 +54,14 @@ docker compose up -d --build
 ```
 
 Depois acesse `http://localhost` e conclua a tela de **primeira configuração**.
+
+### Opção 3 — Linux/WSL manual
+
+```bash
+cd sgc-agmeal
+bash instalar.sh   # instala deps, gera scripts e atalhos
+bash start.sh      # inicia o servidor
+```
 
 ### Variáveis de Ambiente Suportadas
 | Variável | Padrão | Descrição |

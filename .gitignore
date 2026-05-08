@@ -20,6 +20,17 @@ data/.flask_secret
 # Uploads locais (pode conter fotos/dados pessoais)
 uploads/
 
+# Runtime do Gunicorn (start.sh / stop.sh)
+sgc.pid
+sgc.log
+
+# Scripts gerados automaticamente pelo instalar.sh
+# (são produzidos a partir dos heredocs no instalar.sh — não versionar)
+/start.sh
+/stop.sh
+/SGC-Iniciar.bat
+/SGC-Parar.bat
+
 # Sistema Operacional
 .DS_Store
 Thumbs.db
