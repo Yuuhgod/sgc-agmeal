@@ -34,7 +34,7 @@
                         <td>{{ pessoa.matricula }}</td>
                         <td>{{ pessoa.telefone or pessoa.telefone_whatsapp or 'Não informado' }}</td>
                         <td class="text-center pe-4">
-                            <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-outline-primary" title="Editar" aria-label="Editar associado"><i class="fa-solid fa-pen"></i></a>
+                            <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-outline-primary" title="Editar" aria-label="Editar associado"><i class="fa-solid fa-pen"></i></a>
                         </td>
                     </tr>
                     {% else %}

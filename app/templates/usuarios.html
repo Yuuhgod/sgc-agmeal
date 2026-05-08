@@ -43,7 +43,7 @@
                         <td class="text-center pe-4">
                             {% if u.id != usuario_id_atual %}
                             <form action="{{ url_for('excluir_usuario', id=u.id) }}" method="POST" class="d-inline"
-                                  onsubmit="return confirm('Tem certeza que deseja remover o usuário {{ u.username }}?');">
+                                  onsubmit="return confirm('Tem certeza que deseja remover o usuário ' + {{ u.username | tojson }} + '?');">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir usuário" aria-label="Excluir usuário">
                                     <i class="fa-solid fa-trash"></i>

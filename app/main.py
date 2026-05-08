@@ -64,8 +64,23 @@ def _carregar_secret_key():
         return env
     path = os.path.join(data_dir, '.flask_secret')
     if os.path.isfile(path):
-        with open(path, encoding='utf-8') as fh:
-            return fh.read().strip()
+        try:
+            with open(path, encoding='utf-8') as fh:
+                return fh.read().strip()
+        except PermissionError:
+            # Arquivo criado como root (Docker) com modo 600 — tenta corrigir as permissões.
+            try:
+                os.chmod(path, 0o600)
+                with open(path, encoding='utf-8') as fh:
+                    return fh.read().strip()
+            except (OSError, PermissionError):
+                logging.warning(
+                    'Não foi possível ler %s (permissão negada). '
+                    'Execute: sudo chmod 600 %s   ou defina SECRET_KEY no ambiente.',
+                    path, path,
+                )
+                # Gera uma chave temporária (sessões serão perdidas ao reiniciar).
+                return secrets.token_urlsafe(48)
     key = secrets.token_urlsafe(48)
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write(key)
@@ -121,6 +136,14 @@ app.logger.setLevel(logging.INFO)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _normalizar_cpf(cpf):
+    """Retorna o CPF formatado como XXX.XXX.XXX-XX a partir de qualquer entrada."""
+    digits = re.sub(r'\D', '', cpf)
+    if len(digits) == 11:
+        return f'{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}'
+    return cpf.strip()
 
 
 def _bytes_sao_imagem_png_ou_jpeg(data):
@@ -180,7 +203,14 @@ def _garantir_coluna_role():
 
 
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+    except Exception as exc:
+        # Ignora erros de "table already exists" em corridas entre workers do Gunicorn.
+        if 'already exists' in str(exc).lower():
+            app.logger.info('Tabelas já existem (criadas por outro worker) — ignorando.')
+        else:
+            raise
     _garantir_coluna_role()
 
 
@@ -368,7 +398,7 @@ def login():
     return render_template('login.html')
 
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 def logout():
     if 'usuario_id' in session:
         registrar_auditoria(
@@ -445,11 +475,13 @@ def _processar_foto_base64(foto_b64):
 def cadastro():
     if request.method == 'POST':
         try:
-            cpf_limpo = request.form['cpf'].strip()
+            cpf_raw = request.form['cpf'].strip()
 
-            if not validar_cpf(cpf_limpo):
+            if not validar_cpf(cpf_raw):
                 flash('O CPF digitado é matematicamente inválido.', 'danger')
                 return render_template('cadastro.html', username=session.get('username'))
+
+            cpf_formatado = _normalizar_cpf(cpf_raw)
 
             foto_b64 = request.form.get('foto_base64')
             nome_arquivo = None
@@ -469,7 +501,7 @@ def cadastro():
                 nome=request.form['nome'].strip(),
                 matricula=request.form['matricula'].strip(),
                 rg=request.form['rg'].strip(),
-                cpf=cpf_limpo,
+                cpf=cpf_formatado,
                 telefone=request.form.get('telefone', '').strip(),
                 telefone_whatsapp=request.form.get('telefone_whatsapp', '').strip(),
                 foto_perfil=nome_arquivo,
@@ -632,23 +664,32 @@ def editar(id):
         foto_anterior = associado.foto_perfil
         nova_foto_nome = None
         try:
-            cpf_limpo = request.form['cpf'].strip()
-            if not validar_cpf(cpf_limpo):
+            cpf_raw = request.form['cpf'].strip()
+            if not validar_cpf(cpf_raw):
                 flash('O CPF digitado é matematicamente inválido.', 'danger')
                 return redirect(url_for('editar', id=id))
+
+            cpf_formatado = _normalizar_cpf(cpf_raw)
 
             antes = {c: getattr(associado, c) for c in CAMPOS_ASSOCIADO_AUDITAVEIS}
 
             associado.nome = request.form['nome'].strip()
             associado.matricula = request.form['matricula'].strip()
             associado.rg = request.form['rg'].strip()
-            associado.cpf = cpf_limpo
+            associado.cpf = cpf_formatado
             associado.telefone = request.form.get('telefone', '').strip()
             associado.telefone_whatsapp = request.form.get('telefone_whatsapp', '').strip()
             associado.endereco = request.form['endereco'].strip()
-            associado.data_nascimento = datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date()
+
+            try:
+                associado.data_nascimento = datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date()
+                associado.data_admissao = datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date()
+            except ValueError:
+                db.session.rollback()
+                flash('Data de nascimento ou admissão inválida. Use o formato correto.', 'danger')
+                return redirect(url_for('editar', id=id))
+
             associado.email = request.form['email'].strip()
-            associado.data_admissao = datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date()
             associado.dependentes = request.form.get('dependentes', '').strip()
 
             foto = request.files.get('foto_perfil')
@@ -701,6 +742,7 @@ def editar(id):
 def excluir(id):
     associado = Associado.query.get_or_404(id)
     foto_para_remover = associado.foto_perfil
+    cpf_capturado = associado.cpf
     nome = associado.nome
     matricula = associado.matricula
     associado_id = associado.id
@@ -712,7 +754,7 @@ def excluir(id):
             entidade='associado',
             entidade_id=associado_id,
             descricao=f'{nome} (matrícula {matricula})',
-            detalhes=f'CPF: {associado.cpf}',
+            detalhes=f'CPF: {cpf_capturado}',
         )
         db.session.commit()
         _remover_foto_do_disco(foto_para_remover)
@@ -741,15 +783,14 @@ def perfil():
 
         username_anterior = usuario.username
         senha_alterada = False
+        username_alterado = False
 
         if novo_username != usuario.username:
             existente = Usuario.query.filter_by(username=novo_username).first()
             if existente:
                 flash('Este nome de usuário já está em uso.', 'warning')
                 return redirect(url_for('perfil'))
-
-            usuario.username = novo_username
-            session['username'] = novo_username
+            username_alterado = True
 
         if nova_senha:
             if len(nova_senha) < 8:
@@ -761,9 +802,13 @@ def perfil():
             usuario.set_senha(nova_senha)
             senha_alterada = True
 
+        # Aplica mudança de username somente após passar todas as validações.
+        if username_alterado:
+            usuario.username = novo_username
+
         mudancas = []
-        if username_anterior != usuario.username:
-            mudancas.append(f'usuário: "{username_anterior}" → "{usuario.username}"')
+        if username_alterado:
+            mudancas.append(f'usuário: "{username_anterior}" → "{novo_username}"')
         if senha_alterada:
             mudancas.append('senha alterada')
         if mudancas:
@@ -775,6 +820,8 @@ def perfil():
                 detalhes='\n'.join(mudancas),
             )
         db.session.commit()
+        # Sincroniza a sessão com o username persistido no banco.
+        session['username'] = usuario.username
         flash('Perfil administrativo atualizado com sucesso!', 'success')
         return redirect(url_for('dashboard'))
 

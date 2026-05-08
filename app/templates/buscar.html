@@ -8,7 +8,7 @@
         <i class="fa-solid fa-magnifying-glass me-2"></i>Filtros de Busca
     </div>
     <div class="card-body bg-white rounded-bottom">
-        <form action="/buscar" method="POST">
+        <form action="{{ url_for('buscar') }}" method="POST">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <div class="row align-items-end">
                 <div class="col-md-4 mb-3">
@@ -37,7 +37,7 @@
         <span><i class="fa-solid fa-list me-2"></i>Resultados Encontrados: {{ resultados|length }}</span>
         
         {% if resultados|length > 0 %}
-        <form action="/exportar_pdf" method="POST" class="m-0 p-0" target="_blank">
+        <form action="{{ url_for('exportar_pdf') }}" method="POST" class="m-0 p-0" target="_blank">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <input type="hidden" name="nome_export" value="{{ request.form.get('nome', '') }}">
             <input type="hidden" name="matricula_export" value="{{ request.form.get('matricula', '') }}">
@@ -67,8 +67,8 @@
                         <td>{{ pessoa.data_admissao.strftime('%d/%m/%Y') }}</td>
                         <td class="text-center pe-4">
                             <div class="btn-group" role="group">
-                                <a href="/editar/{{ pessoa.id }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
-                                <a href="/exportar_ficha/{{ pessoa.matricula }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Gerar Ficha"><i class="fa-solid fa-file-pdf"></i></a>
+                                <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
+                                <a href="{{ url_for('exportar_ficha', matricula=pessoa.matricula) }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Gerar Ficha"><i class="fa-solid fa-file-pdf"></i></a>
                                 <form action="{{ url_for('excluir', id=pessoa.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-sm btn-danger" title="Excluir"><i class="fa-solid fa-trash"></i></button>
@@ -80,7 +80,7 @@
                     <tr>
                         <td colspan="5" class="text-center py-5 text-muted">
                             <i class="fa-solid fa-inbox fa-3x mb-3 opacity-25"></i><br>
-                            Utilize os filtros acima para buscar associados.
+                            Nenhum associado encontrado com os filtros informados.
                         </td>
                     </tr>
                     {% endfor %}

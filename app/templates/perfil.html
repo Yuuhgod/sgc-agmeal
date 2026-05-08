@@ -10,7 +10,7 @@
                 <h4 style="color: var(--agmeal-azul);"><i class="fa-solid fa-user-gear me-2"></i>Editar Meu Perfil</h4>
             </div>
             <div class="card-body">
-                <form action="/perfil" method="POST">
+                <form action="{{ url_for('perfil') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <div class="mb-3">
                         <label class="form-label fw-bold">Nome de Usuário (Login)</label>
