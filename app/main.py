@@ -16,6 +16,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
@@ -34,6 +35,7 @@ from database import (
     ACAO_AUTH_LOGIN,
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
+    ACAO_SISTEMA_BACKUP,
     ACAO_USUARIO_CRIAR,
     ACAO_USUARIO_EXCLUIR,
     ACAO_USUARIO_PALAVRA,
@@ -108,6 +110,9 @@ db_path = os.path.join(data_dir, 'sgc.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+backups_dir = os.path.join(data_dir, 'backups')
+os.makedirs(backups_dir, exist_ok=True)
+
 csrf = CSRFProtect(app)
 
 # Observação: memory:// conta por worker do Gunicorn. A defesa principal contra brute force
@@ -175,6 +180,28 @@ def _gerar_nome_foto(matricula, extensao):
 
 
 db.init_app(app)
+
+from backup_service import criar_backup_zip, listar_backups_locais
+
+
+def _backup_keep_local():
+    try:
+        return max(1, int(os.environ.get('BACKUP_KEEP_LOCAL', '14')))
+    except ValueError:
+        return 14
+
+
+def _backup_keep_sync():
+    try:
+        return max(1, int(os.environ.get('BACKUP_KEEP_SYNC', '60')))
+    except ValueError:
+        return 60
+
+
+def _backup_sync_dir():
+    d = os.environ.get('BACKUP_SYNC_DIR', '').strip()
+    return d or None
+
 
 
 def _garantir_coluna_role():
@@ -1052,6 +1079,71 @@ def exportar_lista_simples():
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = 'inline; filename=lista_associados.pdf'
     return response
+
+
+@app.route('/admin/backup', methods=['GET'])
+@admin_required
+def admin_backup():
+    recentes = listar_backups_locais(backups_dir)
+    sync_dir = _backup_sync_dir()
+    return render_template(
+        'admin_backup.html',
+        username=session.get('username'),
+        sync_dir=sync_dir,
+        recentes=recentes,
+        keep_local=_backup_keep_local(),
+        keep_sync=_backup_keep_sync(),
+    )
+
+
+@app.route('/admin/backup/gerar', methods=['POST'])
+@admin_required
+@limiter.limit('12 per hour')
+def admin_backup_gerar():
+    copiar = request.form.get('copiar_drive') == '1'
+    sync_dir = _backup_sync_dir() if copiar else None
+    if copiar and not sync_dir:
+        flash(
+            'Para copiar automaticamente para a nuvem, defina BACKUP_SYNC_DIR no servidor '
+            '(caminho da pasta sincronizada pelo Google Drive ou OneDrive).',
+            'warning',
+        )
+        return redirect(url_for('admin_backup'))
+
+    try:
+        info = criar_backup_zip(
+            data_dir=data_dir,
+            upload_folder=UPLOAD_FOLDER,
+            backups_dir=backups_dir,
+            sync_dir=sync_dir,
+            keep_local=_backup_keep_local(),
+            keep_sync=_backup_keep_sync(),
+            log=current_app.logger,
+        )
+    except Exception:
+        current_app.logger.exception('Falha ao gerar backup')
+        flash('Não foi possível gerar o backup. Verifique permissões de pasta e o log do servidor.', 'danger')
+        return redirect(url_for('admin_backup'))
+
+    detalhes = (
+        f"arquivo={info['zip_filename']}\n"
+        f"tamanho_bytes={info['size_bytes']}\n"
+        f"copia_nuvem={'sim' if info['sync_path'] else 'não'}"
+    )
+    registrar_auditoria(
+        ACAO_SISTEMA_BACKUP,
+        entidade='backup',
+        descricao='Backup ZIP gerado',
+        detalhes=detalhes,
+        commit=True,
+    )
+
+    return send_file(
+        info['zip_path'],
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=info['zip_filename'],
+    )
 
 
 if __name__ == '__main__':

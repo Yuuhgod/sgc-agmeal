@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Backup{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white fw-bold py-3 d-flex align-items-center" style="color: var(--agmeal-azul);">
+        <i class="fa-solid fa-cloud-arrow-up me-2"></i>Backup do sistema
+    </div>
+    <div class="card-body">
+        <p class="text-muted">
+            Gera um arquivo <strong>.zip</strong> com o banco de dados (cópia segura do SQLite),
+            as fotos dos associados e o arquivo de segredo de sessão (se existir).
+            Você pode guardar o ZIP em pen drive, e-mail interno ou pasta sincronizada
+            (Google Drive, OneDrive, etc.).
+        </p>
+
+        <div class="alert alert-secondary border-0 small">
+            <p class="mb-1 fw-bold"><i class="fa-solid fa-folder-tree me-2"></i>Pasta de sincronização (opcional)</p>
+            {% if sync_dir %}
+            <p class="mb-0"><code>{{ sync_dir }}</code></p>
+            <p class="mb-0 mt-2 text-muted">Marque a opção abaixo para copiar o ZIP automaticamente para essa pasta
+                (além do download no navegador).</p>
+            {% else %}
+            <p class="mb-0">Não configurada no servidor. Para ativar, defina a variável de ambiente
+                <code>BACKUP_SYNC_DIR</code> com o caminho absoluto da pasta sincronizada pela nuvem.</p>
+            <p class="mb-0 mt-2 text-muted small">
+                Exemplo no WSL com Google Drive no Windows:
+                <code>/mnt/c/Users/NomeDaConta/Google Drive/SGC-Backups</code>
+            </p>
+            {% endif %}
+            <p class="mb-0 mt-2 text-muted small">
+                Retenção local: últimos <strong>{{ keep_local }}</strong> arquivos em <code>data/backups/</code>.
+                {% if sync_dir %}Na pasta de sincronização: últimos <strong>{{ keep_sync }}</strong>.{% endif %}
+            </p>
+        </div>
+
+        <form action="{{ url_for('admin_backup_gerar') }}" method="POST" class="mt-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            {% if sync_dir %}
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="copiar_drive" value="1" id="copiar_drive" checked>
+                <label class="form-check-label" for="copiar_drive">
+                    Também copiar o ZIP para a pasta de sincronização (nuvem)
+                </label>
+            </div>
+            {% endif %}
+            <button type="submit" class="btn btn-primary-agmeal fw-bold">
+                <i class="fa-solid fa-download me-2"></i>Gerar backup e baixar ZIP
+            </button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary ms-2">Voltar</a>
+        </form>
+
+        {% if recentes %}
+        <hr class="my-4">
+        <h6 class="fw-bold text-muted mb-3"><i class="fa-solid fa-clock-rotate-left me-2"></i>Backups recentes neste computador</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Arquivo</th>
+                        <th class="text-end">Tamanho</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in recentes %}
+                    <tr>
+                        <td><code>{{ b.nome }}</code></td>
+                        <td class="text-end text-muted">{{ (b.bytes / 1024) | round(1) }} KB</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

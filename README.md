@@ -8,6 +8,7 @@ Sistema desenvolvido em **Python (Flask + SQLAlchemy)** para a gestão de regist
 - **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão e listagem paginada.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
+- **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
 - **Interface:** front-end responsivo com Bootstrap 5 e FontAwesome.
 
 ## Tecnologias
@@ -71,9 +72,38 @@ bash start.sh      # inicia o servidor
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
 | `GUNICORN_TIMEOUT` | `60` | Timeout (s) por requisição. |
 | `TZ` | `America/Maceio` | Fuso horário do contêiner. |
+| `BACKUP_SYNC_DIR` | *(vazio)* | Caminho absoluto de uma pasta sincronizada pela nuvem; usado pelo menu **Backup** e por `scripts/backup_cli.py`. |
+| `BACKUP_KEEP_LOCAL` | `14` | Quantidade de arquivos ZIP a manter em `data/backups/`. |
+| `BACKUP_KEEP_SYNC` | `60` | Quantidade de ZIPs a manter na pasta `BACKUP_SYNC_DIR`. |
 
-### Backup do Banco
-O banco SQLite fica em `./data/sgc.db`. Copie periodicamente (ex.: cron diário) para outro disco. As fotos ficam em `./uploads/`.
+### Backup (banco + fotos)
+
+Administradores acessam **Backup do sistema** no menu do usuário. O ZIP inclui
+`data/sgc.db` (via API de backup do SQLite), `data/.flask_secret` (se existir) e
+todas as fotos em `app/static/uploads/fotos/`.
+
+Para **cópia automática na nuvem** sem API do Google: instale o cliente de
+Google Drive (ou OneDrive) no Windows e aponte `BACKUP_SYNC_DIR` no WSL para a
+pasta correspondente (ex.: `/mnt/c/Users/Nome/Google Drive/SGC-Backups`).
+Marque a opção na tela de backup ou use o agendamento abaixo.
+
+Backup agendado (ex.: todo dia às 02:00 no WSL):
+
+```bash
+0 2 * * * cd ~/sgc-agmeal && .venv/bin/python scripts/backup_cli.py >>/tmp/sgc-backup.log 2>&1
+```
+
+### Integração contínua (GitHub Actions)
+
+O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) instala as
+dependências de sistema do WeasyPrint, instala o `requirements.txt` e executa
+`python3 test_app.py` a cada push ou pull request. **Não** é necessário token
+pessoal (PAT): o GitHub fornece `GITHUB_TOKEN` automaticamente.
+
+### Backup manual do arquivo único
+O arquivo `data/sgc.db` pode ser copiado manualmente quando o servidor estiver
+parado; o fluxo via interface é preferível porque inclui fotos e gera cópia
+consistente do SQLite com o servidor em execução.
 
 ## Estrutura
 ```
@@ -82,8 +112,9 @@ app/
   database.py        Modelos SQLAlchemy
   templates/         Jinja2
   static/            CSS, JS e imagens (inclui uploads/fotos)
-data/                Banco SQLite e segredo de sessão
-uploads/             Fotos de perfil dos associados (volume)
+data/                Banco SQLite, backups ZIP e segredo de sessão
+scripts/             backup_cli.py (agendamento)
+.github/workflows/ CI (testes)
 dockerfile
 docker-compose.yml
 nginx.conf

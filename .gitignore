@@ -12,6 +12,7 @@ __pycache__/
 # Banco de Dados (NUNCA subir dados reais de associados pro GitHub)
 data/sgc.db
 *.sqlite3
+data/backups/
 
 # Variáveis de Ambiente e Segredos
 .env

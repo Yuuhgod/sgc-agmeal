@@ -1,8 +1,21 @@
 """Teste completo do app SGC-AGMEAL."""
 import sys, os, re
 
-os.chdir('/sgc/app')
-sys.path.insert(0, '/sgc/app')
+_THIS = os.path.abspath(os.path.dirname(__file__))
+_APP = os.path.join(_THIS, 'app')
+_DOCKER_APP = '/sgc/app'
+
+if os.path.isdir(_APP):
+    os.chdir(_APP)
+    sys.path.insert(0, _APP)
+elif os.path.isdir(_DOCKER_APP):
+    os.chdir(_DOCKER_APP)
+    sys.path.insert(0, _DOCKER_APP)
+else:
+    raise RuntimeError(
+        f'Não encontrei o pacote app/ em {_APP} nem {_DOCKER_APP}. '
+        'Execute a partir da raiz do repositório sgc-agmeal.'
+    )
 
 # Desabilita CSRF para o ambiente de testes (recomendação oficial do Flask-WTF).
 # A proteção CSRF é validada individualmente no teste de login abaixo.
@@ -21,6 +34,18 @@ def check(label, status, expected=200):
     results.append((ok, f"{'[OK]' if ok else '[FALHOU]'} {label}: HTTP {status} (esperado {expected})"))
 
 with app.test_client() as c:
+    with app.app_context():
+        if Usuario.query.count() == 0:
+            r_seed = c.post(
+                '/setup',
+                data={
+                    'username': 'admin',
+                    'senha': 'admin123',
+                    'palavra_recuperacao': 'frase_teste_seg',
+                },
+            )
+            check("POST /setup (primeira execução / CI)", r_seed.status_code, 302)
+
     with app.app_context():
         users_count = Usuario.query.count()
         assoc_count = Associado.query.count()
@@ -100,19 +125,28 @@ with app.test_client() as c:
         r = c.post('/exportar_lista_simples')
         check("POST /exportar_lista_simples (PDF)", r.status_code, 200)
 
-        # 18. Esqueci senha (GET — acessível sem autenticação)
+        # 18. Backup (admin)
+        r = c.get('/admin/backup')
+        check("GET /admin/backup", r.status_code, 200)
+        r = c.post('/admin/backup/gerar', data={})
+        check("POST /admin/backup/gerar (ZIP)", r.status_code, 200)
+        if r.status_code == 200:
+            zip_ok = len(r.data) >= 4 and r.data[:2] == b'PK'
+            results.append((zip_ok, f"{'[OK]' if zip_ok else '[FALHOU]'} Corpo do backup é ZIP válido (assinatura PK)"))
+
+        # 19. Esqueci senha (GET — acessível sem autenticação)
         r = c.get('/esqueci_senha')
         check("GET /esqueci_senha", r.status_code, 200)
 
-        # 19. Logout via POST (seguro contra CSRF)
+        # 20. Logout via POST (seguro contra CSRF)
         r = c.post('/logout')
         check("POST /logout (redireciona para login)", r.status_code, 302)
 
-        # 20. Após logout, dashboard deve bloquear e redirecionar para login
+        # 21. Após logout, dashboard deve bloquear e redirecionar para login
         r = c.get('/')
         check("GET / após logout (bloqueado -> redireciona para login)", r.status_code, 302)
 
-        # 21. GET /logout deve retornar 405 (somente POST é aceito)
+        # 22. GET /logout deve retornar 405 (somente POST é aceito)
         r = c.get('/logout')
         check("GET /logout deve retornar 405 (Method Not Allowed)", r.status_code, 405)
 
