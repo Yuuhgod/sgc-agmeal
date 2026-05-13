@@ -87,7 +87,41 @@ Google Drive (ou OneDrive) no Windows e aponte `BACKUP_SYNC_DIR` no WSL para a
 pasta correspondente (ex.: `/mnt/c/Users/Nome/Google Drive/SGC-Backups`).
 Marque a opção na tela de backup ou use o agendamento abaixo.
 
-Backup agendado (ex.: todo dia às 02:00 no WSL):
+#### Backup automático **uma vez por dia** no Google Drive (recomendado)
+
+A ideia é: o script grava o ZIP **numa pasta do disco que o Google Drive já
+sincroniza** — não há login OAuth nem token; o cliente oficial do Google faz o
+resto.
+
+1. **Instale** [Google Drive para computador](https://www.google.com/drive/download/) e faça login com a conta da associação.
+2. **Crie uma pasta** só para estes backups, por exemplo `SGC-AGMEAL-Backup`, dentro do Google Drive no Explorador de ficheiros (aparece como “Google Drive” no utilizador).
+3. **Copie** o ficheiro [scripts/backup_diario_GoogleDrive.bat](scripts/backup_diario_GoogleDrive.bat) para o Ambiente de Trabalho (ou outro sítio fixo). Por defeito ele usa `%USERPROFILE%\Google Drive\SGC-AGMEAL-Backup` — ajuste a variável `GFOLDER` dentro do `.bat` se usar outro nome/caminho.
+4. **Teste**: duplo clique no `.bat`. Deve criar a pasta se não existir, correr o backup no WSL e copiar o ZIP para lá; minutos depois o ficheiro deve aparecer na web do Google Drive.
+5. **Agende no Windows** (mais fiável do que cron no WSL quando o PC dorme):
+   - Abra o **Agendador de Tarefas** → *Criar Tarefa…* (não “Criar tarefa básica” se quiser mais controlo).
+   - **Geral**: nome `SGC-AGMEAL Backup diário`; marque “Executar quer o utilizador tenha iniciado sessão ou não” se quiser correr mesmo sem janela aberta (opcional).
+   - **Accionadores**: Novo → Diariamente → hora (ex.: 02:00).
+   - **Acções**: Novo → *Iniciar um programa* → Programa: caminho completo para `backup_diario_GoogleDrive.bat`.
+   - **Condições**: desmarque “Iniciar só se o computador estiver ligado à corrente elétrica” se for portátil e quiser backup na bateria.
+   - **Definições**: marque “Executar tarefa o mais breve possível após uma inicialização agendada ter sido perdida” para recuperar um dia em que o PC esteve desligado à hora do backup.
+
+O script `backup_diario_GoogleDrive.bat` define `BACKUP_SYNC_DIR` em caminho
+Linux (via `wslpath`) e chama `scripts/backup_cli.py`, que também mantém cópias
+em `data/backups/` e aplica `BACKUP_KEEP_SYNC` na pasta da nuvem (predefinição
+**60** ficheiros — ajustável por variável de ambiente no sistema ou no próprio
+`.bat` com `set BACKUP_KEEP_SYNC=30` antes da linha `wsl.exe`).
+
+**Alternativa só em Linux/WSL** (se o computador ficar ligado nessa hora):
+
+```bash
+# Adicione ao crontab (crontab -e), ajustando o caminho da pasta sincronizada:
+BACKUP_SYNC_DIR='/mnt/c/Users/SEU_USUARIO/Google Drive/SGC-AGMEAL-Backup'
+0 2 * * * cd ~/sgc-agmeal && .venv/bin/python scripts/backup_cli.py >>/tmp/sgc-backup.log 2>&1
+```
+
+Ou exporte `BACKUP_SYNC_DIR` no `~/.profile` e use só a linha `cd ... && python ...` no cron.
+
+Backup agendado (exemplo mínimo **sem** pasta na nuvem — só `data/backups/`):
 
 ```bash
 0 2 * * * cd ~/sgc-agmeal && .venv/bin/python scripts/backup_cli.py >>/tmp/sgc-backup.log 2>&1
@@ -113,7 +147,7 @@ app/
   templates/         Jinja2
   static/            CSS, JS e imagens (inclui uploads/fotos)
 data/                Banco SQLite, backups ZIP e segredo de sessão
-scripts/             backup_cli.py (agendamento)
+scripts/             backup_cli.py, backup_diario_GoogleDrive.bat
 .github/workflows/ CI (testes)
 dockerfile
 docker-compose.yml
