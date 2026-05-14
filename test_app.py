@@ -1,5 +1,6 @@
 """Teste completo do app SGC-AGMEAL."""
 import sys, os, re
+from io import BytesIO
 
 _THIS = os.path.abspath(os.path.dirname(__file__))
 _APP = os.path.join(_THIS, 'app')
@@ -22,7 +23,7 @@ else:
 os.environ.setdefault('WTF_CSRF_ENABLED', '0')
 
 from main import app
-from database import db, Usuario, Associado
+from database import Usuario, Associado
 
 app.config['WTF_CSRF_ENABLED'] = False
 app.config['WTF_CSRF_CHECK_DEFAULT'] = False
@@ -34,6 +35,9 @@ def check(label, status, expected=200):
     results.append((ok, f"{'[OK]' if ok else '[FALHOU]'} {label}: HTTP {status} (esperado {expected})"))
 
 with app.test_client() as c:
+    # Não manter um único app.app_context() em todo o ficheiro: /admin/restore chama
+    # db.engine.dispose() e, ao sair de um contexto longo, o teardown do Flask-SQLAlchemy
+    # pode falhar com "Working outside of application context" (visto no CI).
     with app.app_context():
         if Usuario.query.count() == 0:
             r_seed = c.post(
@@ -49,106 +53,143 @@ with app.test_client() as c:
     with app.app_context():
         users_count = Usuario.query.count()
         assoc_count = Associado.query.count()
-        print(f"\n=== SGC-AGMEAL - Teste Completo ===")
-        print(f"DB: {users_count} usuário(s), {assoc_count} associado(s)\n")
+    print(f"\n=== SGC-AGMEAL - Teste Completo ===")
+    print(f"DB: {users_count} usuário(s), {assoc_count} associado(s)\n")
 
-        # 1. Setup (com usuário → deve redirecionar)
-        r = c.get('/setup')
-        check("GET /setup (com usuario -> redireciona)", r.status_code, 302)
+    # 1. Setup (com usuário → deve redirecionar)
+    r = c.get('/setup')
+    check("GET /setup (com usuario -> redireciona)", r.status_code, 302)
 
-        # 2. Página de login acessível sem autenticação
-        r = c.get('/login')
-        check("GET /login", r.status_code, 200)
+    # 2. Página de login acessível sem autenticação
+    r = c.get('/login')
+    check("GET /login", r.status_code, 200)
 
-        # 3. Login com credenciais erradas → retorna 200 com mensagem de erro (sem login ainda)
-        r = c.post('/login', data={'username': 'naoexiste', 'senha': 'senhaerrada'})
-        check("POST /login (credenciais erradas -> 200 com flash)", r.status_code, 200)
+    # 3. Login com credenciais erradas → retorna 200 com mensagem de erro (sem login ainda)
+    r = c.post('/login', data={'username': 'naoexiste', 'senha': 'senhaerrada'})
+    check("POST /login (credenciais erradas -> 200 com flash)", r.status_code, 200)
 
-        # 4. Login com credenciais corretas
-        r = c.post('/login', data={'username': 'admin', 'senha': 'admin123'})
-        check("POST /login (credenciais corretas -> redireciona)", r.status_code, 302)
+    # 4. Login com credenciais corretas
+    r = c.post('/login', data={'username': 'admin', 'senha': 'admin123'})
+    check("POST /login (credenciais corretas -> redireciona)", r.status_code, 302)
 
-        # 5. Dashboard autenticado
-        r = c.get('/')
-        check("GET / (dashboard)", r.status_code, 200)
+    # 5. Dashboard autenticado
+    r = c.get('/')
+    check("GET / (dashboard)", r.status_code, 200)
 
-        # 6. Cadastro (GET)
-        r = c.get('/cadastro')
-        check("GET /cadastro", r.status_code, 200)
+    # 6. Cadastro (GET)
+    r = c.get('/cadastro')
+    check("GET /cadastro", r.status_code, 200)
 
-        # 7. Buscar (GET)
-        r = c.get('/buscar')
-        check("GET /buscar", r.status_code, 200)
+    # 7. Buscar (GET)
+    r = c.get('/buscar')
+    check("GET /buscar", r.status_code, 200)
 
-        # 8. Buscar (POST com filtros vazios → retorna lista completa)
-        r = c.post('/buscar', data={'nome': '', 'matricula': '', 'ano': ''})
-        check("POST /buscar (busca vazia)", r.status_code, 200)
+    # 8. Buscar (POST com filtros vazios → retorna lista completa)
+    r = c.post('/buscar', data={'nome': '', 'matricula': '', 'ano': ''})
+    check("POST /buscar (busca vazia)", r.status_code, 200)
 
-        # 9. Listar todos
-        r = c.get('/listar')
-        check("GET /listar", r.status_code, 200)
+    # 9. Listar todos
+    r = c.get('/listar')
+    check("GET /listar", r.status_code, 200)
 
-        # 10. Perfil
-        r = c.get('/perfil')
-        check("GET /perfil", r.status_code, 200)
+    # 10. Perfil
+    r = c.get('/perfil')
+    check("GET /perfil", r.status_code, 200)
 
-        # 11. Segurança
-        r = c.get('/seguranca')
-        check("GET /seguranca", r.status_code, 200)
+    # 11. Segurança
+    r = c.get('/seguranca')
+    check("GET /seguranca", r.status_code, 200)
 
-        # 12. Usuários (somente admin)
-        r = c.get('/usuarios')
-        check("GET /usuarios (admin)", r.status_code, 200)
+    # 12. Usuários (somente admin)
+    r = c.get('/usuarios')
+    check("GET /usuarios (admin)", r.status_code, 200)
 
-        # 13. Criar novo usuário (admin)
-        r = c.get('/usuarios/novo')
-        check("GET /usuarios/novo", r.status_code, 200)
+    # 13. Criar novo usuário (admin)
+    r = c.get('/usuarios/novo')
+    check("GET /usuarios/novo", r.status_code, 200)
 
-        # 14. Trilha de auditoria (admin)
-        r = c.get('/auditoria')
-        check("GET /auditoria", r.status_code, 200)
+    # 14. Trilha de auditoria (admin)
+    r = c.get('/auditoria')
+    check("GET /auditoria", r.status_code, 200)
 
-        # 15. Editar associado
+    # 15. Editar associado
+    with app.app_context():
         assoc = Associado.query.first()
-        if assoc:
-            r = c.get(f'/editar/{assoc.id}')
-            check(f"GET /editar/{assoc.id}", r.status_code, 200)
-        else:
-            results.append((False, "[FALHOU] Nenhum associado no banco para testar /editar"))
+    if assoc:
+        r = c.get(f'/editar/{assoc.id}')
+        check(f"GET /editar/{assoc.id}", r.status_code, 200)
+    else:
+        results.append((False, "[FALHOU] Nenhum associado no banco para testar /editar"))
 
-        # 16. Exportar ficha individual (PDF)
-        if assoc:
-            r = c.get(f'/exportar_ficha/{assoc.matricula}')
-            check(f"GET /exportar_ficha/{assoc.matricula} (PDF)", r.status_code, 200)
+    # 16. Exportar ficha individual (PDF)
+    if assoc:
+        r = c.get(f'/exportar_ficha/{assoc.matricula}')
+        check(f"GET /exportar_ficha/{assoc.matricula} (PDF)", r.status_code, 200)
 
-        # 17. Exportar lista em PDF (POST)
-        r = c.post('/exportar_lista_simples')
-        check("POST /exportar_lista_simples (PDF)", r.status_code, 200)
+    # 17. Exportar lista em PDF (POST)
+    r = c.post('/exportar_lista_simples')
+    check("POST /exportar_lista_simples (PDF)", r.status_code, 200)
 
-        # 18. Backup (admin)
-        r = c.get('/admin/backup')
-        check("GET /admin/backup", r.status_code, 200)
-        r = c.post('/admin/backup/gerar', data={})
-        check("POST /admin/backup/gerar (ZIP)", r.status_code, 200)
-        if r.status_code == 200:
-            zip_ok = len(r.data) >= 4 and r.data[:2] == b'PK'
-            results.append((zip_ok, f"{'[OK]' if zip_ok else '[FALHOU]'} Corpo do backup é ZIP válido (assinatura PK)"))
+    # 18. Backup (admin)
+    r = c.get('/admin/backup')
+    check("GET /admin/backup", r.status_code, 200)
+    r = c.post('/admin/backup/gerar', data={})
+    check("POST /admin/backup/gerar (ZIP)", r.status_code, 200)
+    zip_bytes = None
+    if r.status_code == 200:
+        zip_bytes = r.data
+        zip_ok = len(r.data) >= 4 and r.data[:2] == b'PK'
+        results.append((zip_ok, f"{'[OK]' if zip_ok else '[FALHOU]'} Corpo do backup é ZIP válido (assinatura PK)"))
 
-        # 19. Esqueci senha (GET — acessível sem autenticação)
-        r = c.get('/esqueci_senha')
-        check("GET /esqueci_senha", r.status_code, 200)
+    # 18b. Restaurar backup (admin) — GET e POST sem confirmação válida
+    r = c.get('/admin/restore')
+    check("GET /admin/restore", r.status_code, 200)
+    r = c.post(
+        '/admin/restore',
+        data={'confirmar_texto': 'errado', 'confirmar_consciencia': '1'},
+    )
+    check("POST /admin/restore (confirmação inválida -> redireciona)", r.status_code, 302)
 
-        # 20. Logout via POST (seguro contra CSRF)
-        r = c.post('/logout')
-        check("POST /logout (redireciona para login)", r.status_code, 302)
+    # 18c. Restaurar com ZIP válido e confirmação correta (mesmos dados)
+    if zip_bytes:
+        r = c.post(
+            '/admin/restore',
+            data={
+                'confirmar_texto': 'RESTAURAR',
+                'confirmar_consciencia': '1',
+                'arquivo': (BytesIO(zip_bytes), 'restore_ci.zip'),
+            },
+            content_type='multipart/form-data',
+        )
+        check("POST /admin/restore (ZIP + RESTAURAR)", r.status_code, 302)
+        loc = r.headers.get('Location', '')
+        ok_login = '/login' in loc
+        results.append(
+            (
+                ok_login,
+                f"{'[OK]' if ok_login else '[FALHOU]'} POST /admin/restore conclui com redirect para login (Location={loc!r})",
+            )
+        )
+        r = c.post('/login', data={'username': 'admin', 'senha': 'admin123'})
+        check("POST /login após restauração", r.status_code, 302)
+    else:
+        results.append((False, "[FALHOU] Sem ZIP do teste de backup para /admin/restore"))
 
-        # 21. Após logout, dashboard deve bloquear e redirecionar para login
-        r = c.get('/')
-        check("GET / após logout (bloqueado -> redireciona para login)", r.status_code, 302)
+    # 19. Esqueci senha (GET — acessível sem autenticação)
+    r = c.get('/esqueci_senha')
+    check("GET /esqueci_senha", r.status_code, 200)
 
-        # 22. GET /logout deve retornar 405 (somente POST é aceito)
-        r = c.get('/logout')
-        check("GET /logout deve retornar 405 (Method Not Allowed)", r.status_code, 405)
+    # 20. Logout via POST (seguro contra CSRF)
+    r = c.post('/logout')
+    check("POST /logout (redireciona para login)", r.status_code, 302)
+
+    # 21. Após logout, dashboard deve bloquear e redirecionar para login
+    r = c.get('/')
+    check("GET / após logout (bloqueado -> redireciona para login)", r.status_code, 302)
+
+    # 22. GET /logout deve retornar 405 (somente POST é aceito)
+    r = c.get('/logout')
+    check("GET /logout deve retornar 405 (Method Not Allowed)", r.status_code, 405)
 
 print("\n" + "="*50)
 ok_count = sum(1 for ok, _ in results if ok)

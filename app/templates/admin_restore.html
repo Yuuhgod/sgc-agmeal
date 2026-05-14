@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Restaurar backup{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white fw-bold py-3 d-flex align-items-center" style="color: var(--agmeal-azul);">
+        <i class="fa-solid fa-cloud-arrow-down me-2"></i>Restaurar backup (substitui dados)
+    </div>
+    <div class="card-body">
+        <div class="alert alert-danger border-0">
+            <p class="mb-2 fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Atenção</p>
+            <p class="mb-0 small">
+                Esta operação <strong>substitui</strong> o banco de dados atual, todas as fotos na pasta de uploads
+                e, se o ZIP incluir, o ficheiro <code>data/.flask_secret</code>.
+                É criado automaticamente um <strong>backup de segurança</strong> em <code>data/backups/</code>
+                antes de aplicar o ZIP — guarde cópias externas se o risco for inaceitável.
+            </p>
+        </div>
+
+        <p class="text-muted small">
+            Para restaurar <strong>sem</strong> esta página (por exemplo em outro computador), siga o ficheiro
+            <code>LEIA-ME.txt</code> dentro do ZIP (parar servidor, extrair ficheiros, reiniciar).
+        </p>
+
+        <p class="text-muted small mb-4">
+            Com <strong>Gunicorn e vários workers</strong> (ou várias réplicas), outros processos podem manter
+            ligações antigas ao SQLite. Após restaurar, <strong>reinicie o serviço</strong> para todos carregarem o novo ficheiro.
+        </p>
+
+        <form action="{{ url_for('admin_restore') }}" method="POST" enctype="multipart/form-data" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+            <div class="mb-3">
+                <label for="arquivo" class="form-label fw-bold">Arquivo ZIP de backup</label>
+                <input class="form-control" type="file" name="arquivo" id="arquivo" accept=".zip,application/zip" required>
+                <div class="form-text">Use apenas ZIP gerados pelo menu <strong>Backup do sistema</strong> ou por <code>scripts/backup_cli.py</code>.</div>
+            </div>
+
+            <div class="mb-3">
+                <label for="confirmar_texto" class="form-label fw-bold">Confirmação por texto</label>
+                <input class="form-control font-monospace" type="text" name="confirmar_texto" id="confirmar_texto"
+                       autocomplete="off" placeholder="{{ confirm_phrase }}" required>
+                <div class="form-text">Digite exatamente: <code>{{ confirm_phrase }}</code></div>
+            </div>
+
+            <div class="form-check mb-4">
+                <input class="form-check-input" type="checkbox" name="confirmar_consciencia" value="1" id="confirmar_consciencia" required>
+                <label class="form-check-label" for="confirmar_consciencia">
+                    Confirmo que compreendo que os dados atuais do sistema serão <strong>substituídos</strong> pelo conteúdo deste ZIP e que esta ação não tem desfazer automático na interface.
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-danger fw-bold">
+                <i class="fa-solid fa-rotate-left me-2"></i>Aplicar restauração
+            </button>
+            <a href="{{ url_for('admin_backup') }}" class="btn btn-outline-secondary ms-2">Ir para backup</a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary ms-2">Voltar</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

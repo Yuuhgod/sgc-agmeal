@@ -92,6 +92,7 @@ ACAO_AUTH_LOGIN = 'auth.login'
 ACAO_AUTH_LOGOUT = 'auth.logout'
 ACAO_AUTH_LOGIN_FALHOU = 'auth.login_falhou'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
+ACAO_SISTEMA_RESTORE = 'sistema.restore'
 
 ACOES_ROTULOS = {
     ACAO_ASSOCIADO_CRIAR: 'Cadastrou associado',
@@ -105,6 +106,7 @@ ACOES_ROTULOS = {
     ACAO_AUTH_LOGOUT: 'Saiu do sistema',
     ACAO_AUTH_LOGIN_FALHOU: 'Tentativa de login (falhou)',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
+    ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
 }
 
 

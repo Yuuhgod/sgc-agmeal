@@ -50,10 +50,13 @@ Conteúdo deste ZIP:
   data/.flask_secret   — chave de sessão (se existia no momento do backup)
 
 Restauração (resumo):
-  1. Pare o servidor (Gunicorn / Docker).
-  2. Extraia este ZIP sobre a pasta do projeto (substituindo arquivos).
-  3. Confirme permissões da pasta data/ e app/static/uploads/fotos/.
-  4. Inicie o servidor novamente.
+  1. Administradores podem usar a página «Restaurar backup» na aplicação (com
+     confirmação explícita por texto). Reinicie o servidor com vários workers
+     após concluir.
+  2. Restauração manual: pare o servidor (Gunicorn / Docker).
+  3. Extraia este ZIP sobre a pasta do projeto (substituindo arquivos).
+  4. Confirme permissões da pasta data/ e app/static/uploads/fotos/.
+  5. Inicie o servidor novamente.
 
 Em caso de dúvida, peça ajuda a quem instalou o sistema.
 """

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
@@ -22,6 +23,7 @@ from flask import (
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import extract, inspect, text
 from weasyprint import HTML
@@ -36,6 +38,7 @@ from database import (
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
     ACAO_SISTEMA_BACKUP,
+    ACAO_SISTEMA_RESTORE,
     ACAO_USUARIO_CRIAR,
     ACAO_USUARIO_EXCLUIR,
     ACAO_USUARIO_PALAVRA,
@@ -103,7 +106,10 @@ app.config.update(
     SESSION_COOKIE_SECURE=_cookie_secure,
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     WTF_CSRF_TIME_LIMIT=3600,
-    MAX_CONTENT_LENGTH=10 * 1024 * 1024,
+    MAX_CONTENT_LENGTH=max(
+        10 * 1024 * 1024,
+        int(os.environ.get('MAX_CONTENT_LENGTH_MB', '128')) * 1024 * 1024,
+    ),
 )
 
 db_path = os.path.join(data_dir, 'sgc.db')
@@ -112,6 +118,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 backups_dir = os.path.join(data_dir, 'backups')
 os.makedirs(backups_dir, exist_ok=True)
+restore_pending_dir = os.path.join(data_dir, 'restore_pending')
+os.makedirs(restore_pending_dir, exist_ok=True)
+
+# Confirmação explícita na UI de restauração (evita substituição acidental).
+RESTORE_CONFIRM_PHRASE = 'RESTAURAR'
 
 csrf = CSRFProtect(app)
 
@@ -182,6 +193,9 @@ def _gerar_nome_foto(matricula, extensao):
 db.init_app(app)
 
 from backup_service import criar_backup_zip, listar_backups_locais
+from restore_service import aplicar_restauracao, extrair_zip_seguro
+
+migrate = Migrate(app, db)
 
 
 def _backup_keep_local():
@@ -1144,6 +1158,137 @@ def admin_backup_gerar():
         as_attachment=True,
         download_name=info['zip_filename'],
     )
+
+
+@app.route('/admin/restore', methods=['GET', 'POST'])
+@admin_required
+@limiter.limit('6 per hour', methods=['POST'])
+def admin_restore():
+    if request.method == 'GET':
+        return render_template(
+            'admin_restore.html',
+            username=session.get('username'),
+            confirm_phrase=RESTORE_CONFIRM_PHRASE,
+        )
+
+    if request.form.get('confirmar_texto', '').strip() != RESTORE_CONFIRM_PHRASE:
+        flash(
+            f'Digite exatamente a palavra {RESTORE_CONFIRM_PHRASE!r} no campo de confirmação.',
+            'danger',
+        )
+        return redirect(url_for('admin_restore'))
+
+    if request.form.get('confirmar_consciencia') != '1':
+        flash('Marque a caixa confirmando que entende que os dados atuais serão substituídos.', 'warning')
+        return redirect(url_for('admin_restore'))
+
+    upload = request.files.get('arquivo')
+    if not upload or not upload.filename:
+        flash('Selecione o arquivo ZIP de backup.', 'warning')
+        return redirect(url_for('admin_restore'))
+
+    nome_original = secure_filename(upload.filename) or 'backup.zip'
+    if not nome_original.lower().endswith('.zip'):
+        flash('O arquivo deve ser um ZIP gerado pelo backup deste sistema.', 'danger')
+        return redirect(url_for('admin_restore'))
+
+    zip_path = os.path.join(restore_pending_dir, f'upload_{uuid.uuid4().hex}.zip')
+    try:
+        upload.save(zip_path)
+    except OSError:
+        current_app.logger.exception('Falha ao gravar ZIP de restauração')
+        try:
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+        except OSError:
+            pass
+        flash('Não foi possível guardar o arquivo enviado. Verifique espaço em disco e permissões.', 'danger')
+        return redirect(url_for('admin_restore'))
+
+    auditoria_uid = session.get('usuario_id')
+    auditoria_user = session.get('username') or '(anônimo)'
+
+    try:
+        with tempfile.TemporaryDirectory(dir=restore_pending_dir) as extract_root:
+            extrair_zip_seguro(zip_path, extract_root, current_app.logger)
+
+            try:
+                criar_backup_zip(
+                    data_dir=data_dir,
+                    upload_folder=UPLOAD_FOLDER,
+                    backups_dir=backups_dir,
+                    sync_dir=None,
+                    keep_local=_backup_keep_local(),
+                    keep_sync=_backup_keep_sync(),
+                    log=current_app.logger,
+                )
+            except Exception:
+                current_app.logger.exception('Falha no backup de segurança antes da restauração')
+                flash(
+                    'Não foi possível criar um backup de segurança dos dados atuais. '
+                    'A restauração foi cancelada; nada foi alterado.',
+                    'danger',
+                )
+                return redirect(url_for('admin_restore'))
+
+            db.session.remove()
+            if db.engine is not None:
+                db.engine.dispose()
+
+            try:
+                aplicar_restauracao(
+                    extract_root=extract_root,
+                    data_dir=data_dir,
+                    upload_folder=UPLOAD_FOLDER,
+                    log=current_app.logger,
+                )
+            except Exception:
+                current_app.logger.exception('Falha ao aplicar restauração')
+                flash(
+                    'Ocorreu um erro ao aplicar o backup. Os dados podem estar inconsistentes; '
+                    'use o ZIP de segurança mais recente em data/backups/ ou restaure manualmente '
+                    '(veja LEIA-ME.txt dentro do ZIP).',
+                    'danger',
+                )
+                return redirect(url_for('admin_restore'))
+
+            db.session.remove()
+            if db.engine is not None:
+                db.engine.dispose()
+
+            registrar_auditoria(
+                ACAO_SISTEMA_RESTORE,
+                entidade='restore',
+                descricao='Restauração aplicada a partir de ZIP enviado na interface',
+                detalhes=f'arquivo_enviado={nome_original}',
+                usuario_id=auditoria_uid,
+                usuario_username=auditoria_user,
+                commit=True,
+            )
+
+    except ValueError as exc:
+        current_app.logger.warning('ZIP de restauração rejeitado: %s', exc)
+        flash(str(exc), 'danger')
+        return redirect(url_for('admin_restore'))
+    except Exception:
+        current_app.logger.exception('Erro inesperado na restauração')
+        flash('Não foi possível processar o ZIP. Verifique se é um backup válido deste sistema.', 'danger')
+        return redirect(url_for('admin_restore'))
+    finally:
+        try:
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+        except OSError:
+            current_app.logger.warning('Não foi possível remover ficheiro temporário: %s', zip_path)
+
+    session.clear()
+    flash(
+        'Restauração concluída. Faça login novamente. '
+        'Se o servidor usar Gunicorn com vários workers ou Docker sem reinício automático, '
+        'reinicie o serviço para todos os processos carregarem o novo banco.',
+        'success',
+    )
+    return redirect(url_for('login'))
 
 
 if __name__ == '__main__':
