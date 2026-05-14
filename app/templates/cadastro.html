@@ -11,7 +11,7 @@ block content %}
         <i class="fa-solid fa-user-plus me-2"></i>Novo Cadastro de Associado
     </div>
     <div class="card-body">
-        <form action="{{ url_for('cadastro') }}" method="POST" enctype="multipart/form-data">
+        <form action="{{ url_for('cadastro') }}" method="POST" enctype="multipart/form-data" class="form-submit-loading" data-loading-label="Salvando…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             {% set foto_salva = request.form.get('foto_base64', '') %}
 

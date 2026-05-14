@@ -1,6 +1,10 @@
 # SGC - AGMEAL (Sistema de Gestão de Cadastros)
 
-Sistema desenvolvido em **Python (Flask + SQLAlchemy)** para a gestão de registros de associados, servido por **Gunicorn** em contêiner **Docker** e publicado via **Nginx** como Proxy Reverso.
+Sistema desenvolvido em **Python (Flask + SQLAlchemy)** para a gestão de registros
+de associados, servido por **Gunicorn** com dados em **SQLite** (`data/sgc.db`).
+O fluxo principal de instalação é **na própria máquina** (Windows com WSL ou
+Linux/WSL manual); ficheiros Docker/Nginx no repositório são **opcionais** para
+quem quiser empacotar o mesmo código noutro ambiente.
 
 ## Funcionalidades
 - **Autenticação:** login com setup guiado de primeira execução e rate limiting.
@@ -14,12 +18,15 @@ Sistema desenvolvido em **Python (Flask + SQLAlchemy)** para a gestão de regist
 
 ## Tecnologias
 - **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter.
-- **Servidor:** Gunicorn atrás de Nginx (com `ProxyFix` no Flask).
+- **Servidor:** Gunicorn (com `ProxyFix` no Flask se estiver atrás de um proxy).
 - **Banco:** SQLite em volume local (`data/sgc.db`).
 - **Frontend:** HTML5, CSS3, Bootstrap 5, Cropper.js.
-- **Infra:** Docker Compose, Nginx Alpine, healthcheck de serviço.
+- **Infra (opcional):** ficheiros Docker Compose e Nginx no repositório para quem preferir esse modelo de deploy.
 
 ## Como Executar
+
+Para **uso num único PC** (sem Docker), siga a **Opção 1** (Windows) ou a **Opção 3**
+(Linux/WSL manual). A Opção 2 só interessa se quiser subir o stack com Docker.
 
 ### Opção 1 — Windows (recomendado para uso em PCs comuns)
 
@@ -47,7 +54,9 @@ Também são criados na Área de Trabalho:
 - `SGC-Iniciar.bat` — força o início manual do servidor
 - `SGC-Parar.bat` — encerra o servidor
 
-### Opção 2 — Docker (servidor / desenvolvimento)
+### Opção 2 — Docker *(opcional)*
+
+> Pode ignorar esta secção se for instalar **apenas localmente** com as opções 1 ou 3.
 
 ```bash
 git clone https://github.com/yuuhgod/sgc-agmeal.git
@@ -72,15 +81,16 @@ bash start.sh      # inicia o servidor
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
 | `GUNICORN_TIMEOUT` | `60` | Timeout (s) por requisição. |
-| `TZ` | `America/Maceio` | Fuso horário do contêiner. |
+| `TZ` | `America/Maceio` | Fuso horário do processo (útil em Linux/WSL e em scripts). |
 | `BACKUP_SYNC_DIR` | *(vazio)* | Caminho absoluto de uma pasta sincronizada pela nuvem; usado pelo menu **Backup** e por `scripts/backup_cli.py`. |
 | `BACKUP_KEEP_LOCAL` | `14` | Quantidade de arquivos ZIP a manter em `data/backups/`. |
 | `BACKUP_KEEP_SYNC` | `60` | Quantidade de ZIPs a manter na pasta `BACKUP_SYNC_DIR`. |
 | `MAX_CONTENT_LENGTH_MB` | `128` | Limite máximo de upload (útil para restaurar ZIPs grandes). |
+| `EXPORTAR_PDF_MAX_SEM_FILTRO` | `400` | Máximo de associados permitidos ao exportar PDF na **busca** sem nenhum filtro; acima disto é pedido um filtro ou use a página **Listar**. |
 
 ### `data/.flask_secret` (permissões)
 
-O ficheiro `data/.flask_secret` guarda a chave de sessão quando não define `SECRET_KEY` no ambiente. Deve ser **legível e gravável só pelo utilizador que corre o Flask/Gunicorn** (modo recomendado `600`). Se for criado ou copiado como **root** (ex.: `docker compose` sem `user:`), o processo normal pode falhar a ler a chave ou a **restauração pela interface** pode não conseguir substituir o ficheiro — nesse caso ajuste dono e permissões (ex.: `sudo chown …:… data/.flask_secret && chmod 600 data/.flask_secret`) ou copie manualmente o `.flask_secret` do ZIP após parar o servidor.
+O ficheiro `data/.flask_secret` guarda a chave de sessão quando não define `SECRET_KEY` no ambiente. Deve ser **legível e gravável só pelo utilizador que corre o Flask/Gunicorn** (modo recomendado `600`). Se o ficheiro tiver dono ou permissões erradas (por exemplo criado por outro utilizador sem permissão de escrita para o serviço), a aplicação pode falhar a ler a chave ou a **restauração pela interface** pode não conseguir substituir o ficheiro — nesse caso ajuste dono e permissões (ex.: `sudo chown …:… data/.flask_secret && chmod 600 data/.flask_secret`) ou copie manualmente o `.flask_secret` do ZIP após parar o servidor.
 
 ### Backup (banco + fotos)
 
@@ -174,16 +184,23 @@ export FLASK_APP=main:app
 flask db upgrade
 ```
 
-Em Docker, execute o mesmo comando no contentor com o código montado, ou
-incorpore `flask db upgrade` no arranque da imagem se for a política da sua
-equipa.
-
 ### Integração contínua (GitHub Actions)
 
 O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) instala as
 dependências de sistema do WeasyPrint, instala o `requirements.txt` e executa
-`python3 test_app.py` a cada push ou pull request. **Não** é necessário token
+`pytest tests/` e `python3 test_app.py` a cada push ou pull request. **Não** é necessário token
 pessoal (PAT): o GitHub fornece `GITHUB_TOKEN` automaticamente.
+
+### Testes automatizados (pytest)
+
+Na raiz do repositório (com o venv activo e dependências instaladas):
+
+```bash
+pytest tests/ -q
+```
+
+Os testes usam a mesma base `data/sgc.db` que o `test_app.py` (instalação local).
+CPFs de exemplo são gerados de forma válida e única por teste para evitar colisões.
 
 ### Backup manual do arquivo único
 O arquivo `data/sgc.db` pode ser copiado manualmente quando o servidor estiver
@@ -201,13 +218,12 @@ app/
   static/            CSS, JS e imagens (inclui uploads/fotos)
 data/                Banco SQLite, backups ZIP, restore_pending/ e segredo de sessão
 scripts/             backup_cli.py, backup_diario_GoogleDrive.bat
+tests/               pytest (auth + CRUD associados)
 .github/workflows/ CI (testes)
-dockerfile
-docker-compose.yml
-nginx.conf
+dockerfile, docker-compose.yml, nginx.conf  # referência opcional (não necessários em instalação local)
 ```
 
 ## Próximos Passos Recomendados
-- Habilitar HTTPS no Nginx (Let's Encrypt / Caddy).
-- Expandir testes automatizados (por exemplo `pytest`) cobrindo CRUD e autenticação.
+- Habilitar **HTTPS** quando expuser o serviço à Internet (proxy reverso ou túnel; em uso só na LAN pode não ser necessário).
+- Alargar `pytest` (mais casos de borda, PDF, backup/restauração).
 - Refatorar rotas em Blueprints conforme o projeto crescer.

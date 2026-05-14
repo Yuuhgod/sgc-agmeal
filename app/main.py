@@ -217,6 +217,14 @@ def _backup_sync_dir():
     return d or None
 
 
+def _exportar_pdf_max_sem_filtro() -> int:
+    """Máximo de linhas permitidas em «Exportar resultados em PDF» sem nenhum filtro (nome, matrícula, ano)."""
+    try:
+        return max(1, int(os.environ.get('EXPORTAR_PDF_MAX_SEM_FILTRO', '400')))
+    except ValueError:
+        return 400
+
+
 
 def _garantir_coluna_role():
     """Mini-migração idempotente: adiciona 'role' em bancos antigos e define usuários
@@ -612,11 +620,21 @@ def buscar():
         if not resultados:
             flash('Nenhum registro encontrado com estes filtros.', 'warning')
 
+    filtros_vazios = not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
+    aviso_pdf_busca_sem_filtro = (
+        request.method == 'POST'
+        and filtros_vazios
+        and resultados is not None
+        and len(resultados) > 0
+    )
+
     return render_template(
         'buscar.html',
         username=session.get('username'),
         resultados=resultados,
         filtros=filtros,
+        aviso_pdf_busca_sem_filtro=aviso_pdf_busca_sem_filtro,
+        exportar_pdf_max_sem_filtro=_exportar_pdf_max_sem_filtro(),
     )
 
 
@@ -634,6 +652,20 @@ def exportar_pdf():
             matricula_busca,
             ano_busca,
         )
+        filtros_vazios = not nome_busca and not matricula_busca and not ano_busca
+        if filtros_vazios:
+            max_sem = _exportar_pdf_max_sem_filtro()
+            total = query.count()
+            if total > max_sem:
+                flash(
+                    f'Exportar PDF sem filtros incluiria os {total} associados e pode bloquear o '
+                    f'servidor durante muito tempo. O limite configurado é {max_sem}. '
+                    f'Use pelo menos um filtro (nome, matrícula ou ano) ou defina '
+                    f'EXPORTAR_PDF_MAX_SEM_FILTRO no ambiente para aumentar o teto — com cuidado.',
+                    'warning',
+                )
+                return redirect(url_for('buscar'))
+
         resultados = query.all()
     except ValueError:
         flash('Ano de admissão inválido.', 'warning')

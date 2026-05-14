@@ -35,7 +35,7 @@
             </p>
         </div>
 
-        <form action="{{ url_for('admin_backup_gerar') }}" method="POST" class="mt-4">
+        <form action="{{ url_for('admin_backup_gerar') }}" method="POST" class="mt-4 form-submit-loading" data-loading-label="Gerando backup…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             {% if sync_dir %}
             <div class="form-check mb-3">

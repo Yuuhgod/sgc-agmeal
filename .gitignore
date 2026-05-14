@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
 
 # Banco de Dados (NUNCA subir dados reais de associados pro GitHub)
 data/sgc.db

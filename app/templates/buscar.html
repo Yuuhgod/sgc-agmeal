@@ -33,16 +33,29 @@
 
 {% if resultados is not none %}
 <div class="card shadow-sm border-0">
+    {% if aviso_pdf_busca_sem_filtro %}
+    <div class="alert alert-warning border-0 rounded-0 mb-0 small py-3 no-auto-close">
+        <strong><i class="fa-solid fa-triangle-exclamation me-1"></i>Exportação em PDF</strong>
+        <p class="mb-0 mt-1">
+            Esta lista corresponde a uma pesquisa <strong>sem filtros</strong> (todos os {{ resultados|length }} associados).
+            O PDF pode demorar e sobrecarregar o servidor. Se aparecerem mais de
+            <strong>{{ exportar_pdf_max_sem_filtro }}</strong> cadastros, o sistema
+            <strong>não permite</strong> exportar sem pelo menos um filtro (nome, matrícula ou ano).
+            Use filtros para reduzir o conjunto ou exporte a lista completa pela página
+            <strong>Listar</strong> (botão «PDF com todos os associados»).
+        </p>
+    </div>
+    {% endif %}
     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3" style="color: var(--agmeal-azul);">
         <span><i class="fa-solid fa-list me-2"></i>Resultados Encontrados: {{ resultados|length }}</span>
         
         {% if resultados|length > 0 %}
-        <form action="{{ url_for('exportar_pdf') }}" method="POST" class="m-0 p-0" target="_blank">
+        <form action="{{ url_for('exportar_pdf') }}" method="POST" class="m-0 p-0 form-submit-loading" data-loading-label="Gerando PDF…" target="_blank">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <input type="hidden" name="nome_export" value="{{ request.form.get('nome', '') }}">
             <input type="hidden" name="matricula_export" value="{{ request.form.get('matricula', '') }}">
             <input type="hidden" name="ano_export" value="{{ request.form.get('ano', '') }}">
-            <button type="submit" class="btn btn-sm btn-ouro"><i class="fa-solid fa-file-pdf me-2"></i>Exportar Busca em PDF</button>
+            <button type="submit" class="btn btn-sm btn-ouro" title="Gera PDF com os mesmos registos desta tabela. Sem filtros na pesquisa, equivale a todos os cadastros (bloqueado acima de {{ exportar_pdf_max_sem_filtro }})."><i class="fa-solid fa-file-pdf me-2"></i>Exportar esta lista em PDF</button>
         </form>
         {% endif %}
     </div>
@@ -68,7 +81,7 @@
                         <td class="text-center pe-4">
                             <div class="btn-group" role="group">
                                 <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
-                                <a href="{{ url_for('exportar_ficha', matricula=pessoa.matricula) }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Gerar Ficha"><i class="fa-solid fa-file-pdf"></i></a>
+                                <a href="{{ url_for('exportar_ficha', matricula=pessoa.matricula) }}" target="_blank" class="btn btn-sm btn-outline-secondary pdf-link-loading" data-loading-label="PDF…" title="Gerar ficha PDF (pode demorar alguns segundos)"><i class="fa-solid fa-file-pdf"></i></a>
                                 <form action="{{ url_for('excluir', id=pessoa.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-sm btn-danger" title="Excluir"><i class="fa-solid fa-trash"></i></button>

@@ -8,14 +8,22 @@
         <span><i class="fa-solid fa-users me-2"></i>Todos os Associados (Ordem Alfabética)</span>
 
         {% if paginacao and paginacao.total > 0 %}
-        <form action="{{ url_for('exportar_lista_simples') }}" method="POST" target="_blank" class="d-inline">
+        <form action="{{ url_for('exportar_lista_simples') }}" method="POST" target="_blank" class="d-inline form-submit-loading" data-loading-label="Gerando PDF…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <button type="submit" class="btn btn-sm btn-ouro">
-                <i class="fa-solid fa-file-pdf me-2"></i>Exportar Lista Simples
+            <button type="submit" class="btn btn-sm btn-ouro" title="Gera um ficheiro PDF com todos os associados ({{ paginacao.total }} no total), não só os desta página. Pode demorar vários segundos.">
+                <i class="fa-solid fa-file-pdf me-2"></i>PDF com todos os associados ({{ paginacao.total }})
             </button>
         </form>
         {% endif %}
     </div>
+    {% if paginacao and paginacao.total > 0 %}
+    <div class="border-top bg-light px-3 py-2">
+        <p class="small text-muted mb-0">
+            <i class="fa-solid fa-circle-info me-1 text-primary"></i>
+            O ficheiro PDF inclui <strong>os {{ paginacao.total }} cadastros</strong> da base de dados, por ordem alfabética — independentemente da página que está a ver na tabela.
+        </p>
+    </div>
+    {% endif %}
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover table-striped mb-0">

@@ -28,7 +28,7 @@
             ligações antigas ao SQLite. Após restaurar, <strong>reinicie o serviço</strong> para todos carregarem o novo ficheiro.
         </p>
 
-        <form action="{{ url_for('admin_restore') }}" method="POST" enctype="multipart/form-data" class="mt-2">
+        <form action="{{ url_for('admin_restore') }}" method="POST" enctype="multipart/form-data" class="mt-2 form-submit-loading" data-loading-label="Restaurando…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
             <div class="mb-3">
