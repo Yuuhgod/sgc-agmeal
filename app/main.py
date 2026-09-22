@@ -8,6 +8,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 
 from flask import (
     Flask,
@@ -135,6 +136,14 @@ limiter = Limiter(
     default_limits=["300 per hour"],
     storage_uri=os.environ.get("RATE_LIMIT_STORAGE", "memory://"),
 )
+
+# Bloqueio de força bruta partilhado entre workers: conta as falhas de login recentes na
+# trilha de auditoria (o mesmo SQLite lido por todos os processos do Gunicorn). Ao contrário
+# do rate limit em memory:// do Flask-Limiter — que conta por worker e fica ineficaz na
+# instalação padrão (vários workers, sem Nginx à frente) —, este limite vale para toda a
+# instalação, independentemente do número de workers.
+LOGIN_MAX_FALHAS_IP = max(1, int(os.environ.get('LOGIN_MAX_FALHAS_IP', '10')))
+LOGIN_JANELA_MINUTOS = max(1, int(os.environ.get('LOGIN_JANELA_MINUTOS', '5')))
 
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads', 'fotos')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -293,6 +302,15 @@ def verificar_primeiro_acesso():
         return redirect(url_for('setup'))
 
 
+@app.before_request
+def proteger_uploads():
+    """Impede acesso anônimo às fotos dos associados (dados pessoais) servidas em
+    /static/uploads/. Nos PDFs as fotos são lidas do disco (file://), sem passar por aqui."""
+    if request.path.startswith('/static/uploads/') and 'usuario_id' not in session:
+        flash('Faça login para acessar este conteúdo.', 'warning')
+        return redirect(url_for('login'))
+
+
 @app.after_request
 def add_header(response):
     """Cabeçalhos de segurança + impede cache de páginas autenticadas."""
@@ -302,6 +320,24 @@ def add_header(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "font-src 'self' data: https://cdnjs.cloudflare.com; "
+        "connect-src 'self'; object-src 'none'; base-uri 'self'; "
+        "form-action 'self'; frame-ancestors 'none'",
+    )
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+    )
+    # HSTS só vale sob HTTPS (navegadores ignoram em HTTP); ProxyFix lê X-Forwarded-Proto.
+    if request.is_secure:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
@@ -376,6 +412,22 @@ def registrar_auditoria(
         app.logger.exception('Falha ao registrar auditoria (acao=%s)', acao)
 
 
+def _login_bloqueado_por_ip(ip):
+    """True se este IP excedeu o limite de falhas de login na janela recente.
+
+    Usa a trilha de auditoria como armazenamento partilhado entre workers, garantindo
+    proteção contra força bruta mesmo na instalação padrão (sem Nginx)."""
+    if not ip:
+        return False
+    desde = datetime.now() - timedelta(minutes=LOGIN_JANELA_MINUTOS)
+    falhas = Auditoria.query.filter(
+        Auditoria.acao == ACAO_AUTH_LOGIN_FALHOU,
+        Auditoria.ip_origem == ip,
+        Auditoria.data_hora >= desde,
+    ).count()
+    return falhas >= LOGIN_MAX_FALHAS_IP
+
+
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
     if Usuario.query.count() > 0:
@@ -413,6 +465,18 @@ def login():
     if request.method == 'POST':
         username = request.form['username'].strip()
         senha = request.form['senha']
+
+        if _login_bloqueado_por_ip(request.remote_addr):
+            app.logger.warning(
+                'Login bloqueado por excesso de tentativas: ip=%s usuario=%s',
+                request.remote_addr, username,
+            )
+            flash(
+                'Muitas tentativas de login malsucedidas deste computador. '
+                'Aguarde alguns minutos e tente novamente.',
+                'danger',
+            )
+            return render_template('login.html')
 
         usuario = Usuario.query.filter_by(username=username).first()
 
@@ -676,7 +740,12 @@ def exportar_pdf():
         return redirect(url_for('buscar'))
 
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-    html_renderizado = render_template('pdf_relatorio.html', resultados=resultados, now=data_geracao)
+    html_renderizado = render_template(
+        'pdf_relatorio.html',
+        resultados=resultados,
+        now=data_geracao,
+        fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
+    )
 
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
@@ -700,6 +769,7 @@ def exportar_ficha(matricula):
         'pdf_relatorio.html',
         resultados=[associado],
         now=data_geracao,
+        fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
     )
 
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
