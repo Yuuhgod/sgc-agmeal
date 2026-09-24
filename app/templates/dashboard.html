@@ -42,8 +42,76 @@
                     {% for valor, rotulo in situacoes.items() if valor != 'ativo' and por_situacao[valor] %}
                     · <a class="link-light" href="{{ url_for('listar_todos', situacao=valor) }}">{{ por_situacao[valor] }} {{ rotulo|lower }}{{ 's' if por_situacao[valor] != 1 }}</a>
                     {% endfor %}
+                    <br>{{ novos_no_mes }} cadastrado{{ 's' if novos_no_mes != 1 }} neste mês
                 </p>
                 <a href="{{ url_for('listar_todos') }}" class="btn btn-ouro mt-auto mx-4"><i class="fa-solid fa-list-check me-2"></i>Ver Todos</a>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row">
+    <div class="col-lg-5 mb-4">
+        <div class="card shadow-sm h-100 border-0">
+            <div class="card-header card-header-agmeal">
+                <i class="fa-solid fa-cake-candles me-2"></i>Aniversariantes de {{ mes_nome }}
+                <span class="badge text-bg-light ms-1">{{ aniversariantes|length }}</span>
+            </div>
+            <div class="card-body p-0 aniversariantes">
+                {% if aniversariantes %}
+                <ul class="list-group list-group-flush">
+                    {% for p in aniversariantes %}
+                    {% set eh_hoje = p.data_nascimento.day == hoje.day %}
+                    <li class="list-group-item d-flex align-items-center gap-3 {% if eh_hoje %}aniversario-hoje{% endif %}">
+                        <span class="dia-aniversario">{{ '%02d'|format(p.data_nascimento.day) }}</span>
+                        <span class="flex-grow-1">
+                            <a href="{{ url_for('editar', id=p.id) }}" class="text-reset text-decoration-none fw-semibold">{{ p.nome }}</a>
+                            <small class="d-block text-muted">{{ hoje.year - p.data_nascimento.year }} anos{% if p.telefone_whatsapp %} · <i class="fa-brands fa-whatsapp"></i> {{ p.telefone_whatsapp }}{% endif %}</small>
+                        </span>
+                        {% if eh_hoje %}<span class="badge text-bg-warning"><i class="fa-solid fa-gift me-1"></i>Hoje</span>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted text-center py-5 mb-0">Nenhum associado ativo faz aniversário neste mês.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7 mb-4">
+        <div class="card shadow-sm h-100 border-0">
+            <div class="card-header card-header-agmeal">
+                <i class="fa-solid fa-chart-column me-2"></i>Admissões por ano
+                <small class="fw-normal text-muted ms-1">últimos 10 anos</small>
+            </div>
+            <div class="card-body">
+                {% if admissoes_max %}
+                <figure class="grafico-barras mb-0" role="img"
+                        aria-label="Admissões por ano: {% for ano, n in admissoes_por_ano %}{{ ano }}: {{ n }}{{ '; ' if not loop.last }}{% endfor %}">
+                    <div class="grafico-area">
+                        {% for ano, n in admissoes_por_ano %}
+                        <div class="grafico-coluna" tabindex="0" data-dica="{{ ano }}: {{ n }} admiss{{ 'ões' if n != 1 else 'ão' }}">
+                            {% if n == admissoes_max or loop.last %}<span class="grafico-valor">{{ n }}</span>{% endif %}
+                            <div class="grafico-barra" style="height: {{ (n / admissoes_max * 100)|round(1) if n else 0 }}%"></div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="grafico-eixo">
+                        {% for ano, _ in admissoes_por_ano %}<span>{{ ano }}</span>{% endfor %}
+                    </div>
+                </figure>
+                <details class="mt-3 small">
+                    <summary class="text-muted">Ver como tabela</summary>
+                    <table class="table table-sm mt-2 mb-0">
+                        <thead><tr><th>Ano</th><th class="text-end">Admissões</th></tr></thead>
+                        <tbody>
+                        {% for ano, n in admissoes_por_ano %}<tr><td>{{ ano }}</td><td class="text-end">{{ n }}</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                </details>
+                {% else %}
+                <p class="text-muted text-center py-5 mb-0">Nenhuma admissão nos últimos 10 anos.</p>
+                {% endif %}
             </div>
         </div>
     </div>

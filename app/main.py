@@ -685,6 +685,12 @@ def esqueci_senha():
     return render_template('esqueci_senha.html')
 
 
+MESES_PT = (
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+)
+
+
 @app.route('/')
 @login_required
 def dashboard():
@@ -692,11 +698,42 @@ def dashboard():
         db.session.query(Associado.situacao, db.func.count(Associado.id))
         .group_by(Associado.situacao).all()
     )
+    hoje = datetime.now().date()
+
+    # Aniversariantes do mês (só ativos), em ordem de dia.
+    aniversariantes = (
+        Associado.query
+        .filter(Associado.situacao == SITUACAO_ATIVO)
+        .filter(extract('month', Associado.data_nascimento) == hoje.month)
+        .order_by(extract('day', Associado.data_nascimento), Associado.nome)
+        .all()
+    )
+
+    # Novos cadastros no mês corrente (data_criacao é gravada em UTC; a margem é irrelevante aqui).
+    inicio_mes = datetime(hoje.year, hoje.month, 1)
+    novos_no_mes = Associado.query.filter(Associado.data_criacao >= inicio_mes).count()
+
+    # Admissões por ano nos últimos 10 anos (inclui anos sem admissão, com zero).
+    anos = list(range(hoje.year - 9, hoje.year + 1))
+    ano_col = extract('year', Associado.data_admissao)
+    por_ano = dict(
+        db.session.query(ano_col, db.func.count(Associado.id))
+        .filter(ano_col >= anos[0])
+        .group_by(ano_col).all()
+    )
+    admissoes_por_ano = [(ano, int(por_ano.get(ano, 0))) for ano in anos]
+
     return render_template(
         'dashboard.html',
         username=session.get('username'),
         total=sum(contagem.values()),
         por_situacao={s: contagem.get(s, 0) for s in SITUACOES_ROTULOS},
+        hoje=hoje,
+        mes_nome=MESES_PT[hoje.month - 1],
+        aniversariantes=aniversariantes,
+        novos_no_mes=novos_no_mes,
+        admissoes_por_ano=admissoes_por_ano,
+        admissoes_max=max((n for _, n in admissoes_por_ano), default=0),
     )
 
 
