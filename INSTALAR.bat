@@ -133,8 +133,9 @@ echo [Etapa 3/4] Copiando arquivos do projeto para o WSL ...
 REM Converte o caminho Windows para formato WSL
 for /f "delims=" %%P in ('wsl.exe -d Ubuntu wslpath -u "%PROJETO_ORIGEM%"') do set "ORIGEM_WSL=%%P"
 
-REM Copia tudo, exceto pastas pesadas/desnecessarias.
-wsl.exe -d Ubuntu -e bash -lc "rm -rf ~/sgc-agmeal && mkdir -p ~/sgc-agmeal && cp -r '%ORIGEM_WSL%/.' ~/sgc-agmeal/ && rm -rf ~/sgc-agmeal/.venv ~/sgc-agmeal/.git ~/sgc-agmeal/__pycache__ ~/sgc-agmeal/sgc.pid ~/sgc-agmeal/sgc.log 2>/dev/null; chmod +x ~/sgc-agmeal/instalar.sh 2>/dev/null; true"
+REM Copia o codigo SEM apagar os dados: numa atualizacao, o script para o servidor,
+REM guarda banco/backups/fotos em ~/sgc-agmeal-preservado-DATA e devolve-os ao lugar.
+wsl.exe -d Ubuntu -e bash "%ORIGEM_WSL%/scripts/copiar_para_wsl.sh" "%ORIGEM_WSL%"
 if errorlevel 1 (
     echo ERRO ao copiar arquivos para o WSL.
     pause

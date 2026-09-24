@@ -11,7 +11,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Gestão de usuários (admin):** criar, editar perfil (admin/usuário), desativar/reativar (bloqueia o acesso na hora, preservando o histórico), redefinir senha com senha provisória e excluir. Contas novas e senhas redefinidas obrigam o usuário a criar a própria senha no primeiro acesso. O sistema nunca fica sem um administrador ativo.
 - **Sessão:** encerrada após `SESSAO_INATIVIDADE_MINUTOS` sem uso (padrão 30) e revalidada no banco a cada acesso.
 - **Recuperação de Acesso:** fluxo de redefinição de senha via Frase de Segurança.
-- **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
+- **Gestão de Associados (CRUD):** cadastro, busca por nome sem diferenciar acentos nem maiúsculas ("joao" acha "JOÃO"), edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
 - **Situação cadastral:** cada associado é *Ativo*, *Inativo* ou *Desligado*, com data e motivo. Inativar/desligar preserva o cadastro e o histórico (preferível a excluir). Filtros por situação na busca e na lista; o painel mostra os ativos e o total por situação.
 - **Dependentes:** cadastrados em tabela própria (nome, parentesco, nascimento e CPF opcionais), com linhas adicionáveis no cadastro/edição; aparecem na ficha PDF e numa aba própria da planilha Excel. A lista antiga em texto ("Maria, João") é convertida automaticamente uma única vez ao atualizar, com parentesco *Não informado*; o texto original fica guardado no banco como cópia de segurança.
@@ -50,6 +50,12 @@ Para **uso num único PC** (sem Docker), siga a **Opção 1** (Windows) ou a **O
    - Cria o atalho **SGC-AGMEAL** na Área de Trabalho (abre direto no navegador)
    - Configura **auto-start no boot** (script `.vbs` invisível em `shell:startup`)
 4. Para usar: duplo clique em **SGC-AGMEAL** na Área de Trabalho
+
+**Para atualizar** uma instalação existente, copie a versão nova da pasta e rode o
+`INSTALAR.bat` de novo. O banco (`data/`), os backups locais e as fotos são
+preservados: antes de trocar o código, o instalador para o servidor e guarda uma
+cópia de segurança em `~/sgc-agmeal-preservado-<data>/` no Ubuntu (as 3 mais
+recentes são mantidas). Mesmo assim, gere um backup pelo menu **Backup** antes.
 
 O servidor passa a iniciar **sozinho** toda vez que o PC ligar — o atalho só
 abre o navegador na URL configurada.
@@ -94,6 +100,8 @@ bash start.sh      # inicia o servidor
 | `BACKUP_ALERTA_DIAS` | `3` | Idade do último backup a partir da qual o painel alerta os administradores. |
 | `SGC_URL_PUBLICA` | *(endereço usado no navegador)* | Endereço do servidor que vai no QR code da carteirinha (ex.: `http://192.168.0.10`). |
 | `CARTEIRINHA_VALIDADE_MESES` | `12` | Validade impressa na carteirinha, a partir da emissão. |
+| `SGC_LOG_ACESSO` | `0` | `1` grava no `sgc.log` uma linha por requisição (desligado para o arquivo não crescer). |
+| `SGC_LOG_MAX_MB` / `SGC_LOG_MANTER` | `5` / `5` | Ao iniciar, um `sgc.log` maior que isto vira `sgc.log.1` (guarda até 5 arquivos). |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |

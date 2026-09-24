@@ -1,0 +1,2 @@
+# Scripts shell precisam de LF mesmo em checkouts no Windows (senão o bash falha com \r).
+*.sh text eol=lf
