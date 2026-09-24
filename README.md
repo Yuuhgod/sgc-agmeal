@@ -18,6 +18,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Painel:** aniversariantes do mês (ativos), gráfico de admissões por ano (últimos 10 anos) e contagem por situação.
 - **Importação em lote (admin):** em *Listar → Importar*, envio de planilha **.xlsx** ou **.csv** (modelo disponível na página, ou uma planilha exportada pelo próprio sistema). Cada linha é validada com as mesmas regras do cadastro, incluindo duplicados no banco e na planilha. Uma pré-visualização mostra os erros por linha antes de gravar, e as linhas válidas entram numa única transação, registrada na auditoria. Só cria cadastros novos; fotos não são importadas.
 - **Planilhas:** exportação em **Excel (.xlsx)** e **CSV** (separado por `;`, abre direto no Excel em português) com os mesmos filtros da busca/lista. Cada exportação fica registrada na auditoria (quem, quantos registros e com quais filtros).
+- **Carteirinha do associado:** PDF em tamanho de cartão (85,6 × 54 mm, frente e verso) com foto, matrícula, data de admissão e validade (`CARTEIRINHA_VALIDADE_MESES`, padrão 12), emitida só para associados ativos. O QR code do verso abre uma página pública de verificação que mostra **apenas** nome, matrícula, situação e validade. O link é assinado com a chave do sistema, então não pode ser forjado nem usado para percorrer cadastros, e deixa de valer se a matrícula mudar. Para o celular abrir o link, defina `SGC_URL_PUBLICA` com o endereço do servidor na rede (ex.: `http://192.168.0.10`); a verificação só funciona para quem estiver nessa rede.
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup automático:** o próprio servidor gera um backup sempre que o último tiver mais de `BACKUP_AUTO_INTERVALO_HORAS` (padrão 24h). Verifica a cada 10 minutos, então um PC desligado à noite faz o backup logo depois de ligado. Só um processo do Gunicorn roda o agendador (lock de arquivo em `data/`). Todo backup, manual ou automático, é verificado (ZIP íntegro e banco sem corrupção) antes de ser guardado. O painel alerta os admins quando o último backup passa de `BACKUP_ALERTA_DIAS` ou quando a última tentativa falhou.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
@@ -25,7 +26,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Interface:** front-end responsivo com Bootstrap 5 e FontAwesome.
 
 ## Tecnologias
-- **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter.
+- **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter, openpyxl (planilhas) e segno (QR code).
 - **Servidor:** Gunicorn (com `ProxyFix` no Flask se estiver atrás de um proxy).
 - **Banco:** SQLite em volume local (`data/sgc.db`).
 - **Frontend:** HTML5, CSS3, Bootstrap 5.3.2, Font Awesome 6.4.2 e Cropper.js 1.6.1 — servidos localmente a partir de `app/static/vendor/` (a interface funciona **sem acesso à internet**). Para atualizar uma biblioteca, substitua a pasta pela nova versão (o nome da pasta inclui a versão, o que permite cache longo no navegador) e ajuste os caminhos nos templates.
@@ -90,6 +91,8 @@ bash start.sh      # inicia o servidor
 | `BACKUP_AUTO` | `1` | `0` desliga o backup automático (o manual e o `scripts/backup_cli.py` continuam funcionando). |
 | `BACKUP_AUTO_INTERVALO_HORAS` | `24` | Idade máxima do último backup antes de o agendador gerar outro. |
 | `BACKUP_ALERTA_DIAS` | `3` | Idade do último backup a partir da qual o painel alerta os administradores. |
+| `SGC_URL_PUBLICA` | *(endereço usado no navegador)* | Endereço do servidor que vai no QR code da carteirinha (ex.: `http://192.168.0.10`). |
+| `CARTEIRINHA_VALIDADE_MESES` | `12` | Validade impressa na carteirinha, a partir da emissão. |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
