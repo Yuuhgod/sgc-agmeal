@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import secrets
+import signal
 import tempfile
 import time
 import uuid
@@ -2738,13 +2739,29 @@ def admin_restore():
             current_app.logger.warning('Não foi possível remover ficheiro temporário: %s', zip_path)
 
     session.clear()
-    flash(
-        'Restauração concluída. Faça login novamente. '
-        'Se o servidor usar Gunicorn com vários workers ou Docker sem reinício automático, '
-        'reinicie o serviço para todos os processos carregarem o novo banco.',
-        'success',
-    )
+    if _recarregar_workers_gunicorn():
+        flash('Restauração concluída. O servidor foi recarregado com os dados restaurados; faça login novamente.', 'success')
+    else:
+        flash(
+            'Restauração concluída. Faça login novamente. '
+            'Se o servidor usar vários processos (Gunicorn/Docker), reinicie o serviço para todos carregarem o novo banco.',
+            'success',
+        )
     return redirect(url_for('login'))
+
+
+def _recarregar_workers_gunicorn():
+    """Sob o Gunicorn, pede ao processo mestre (SIGHUP) que troque todos os workers: os outros
+    processos ainda estariam com o banco antigo aberto. A troca é graciosa (esta requisição termina)."""
+    if 'gunicorn' not in (request.environ.get('SERVER_SOFTWARE') or '').lower():
+        return False
+    try:
+        os.kill(os.getppid(), signal.SIGHUP)
+        app.logger.info('Restauração: SIGHUP enviado ao Gunicorn (pid %s) para recarregar os workers.', os.getppid())
+        return True
+    except OSError:
+        app.logger.warning('Não foi possível pedir ao Gunicorn que recarregue os workers.', exc_info=True)
+        return False
 
 
 if __name__ == '__main__':

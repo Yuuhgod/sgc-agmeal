@@ -24,6 +24,13 @@ def _registrar_funcoes_sqlite(conexao, _registro):
     # sem_acento() permite buscar sem se preocupar com acentos nem maiúsculas.
     if isinstance(conexao, sqlite3.Connection):
         conexao.create_function('sem_acento', 1, normalizar_busca, deterministic=True)
+        # WAL: leituras não esperam as gravações (vários workers + backup automático) e
+        # busy_timeout evita "database is locked" em picos. synchronous=NORMAL é seguro com WAL.
+        cursor = conexao.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA busy_timeout=15000')
+        cursor.execute('PRAGMA synchronous=NORMAL')
+        cursor.close()
 
 
 def _agora_utc():

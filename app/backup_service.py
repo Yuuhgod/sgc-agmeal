@@ -33,10 +33,15 @@ def _sqlite_backup_to_file(src_db: str, dst_path: str, log: logging.Logger) -> N
     """Cópia consistente do SQLite (evita copiar o arquivo .db com o app escrevendo)."""
     if not os.path.isfile(src_db):
         raise FileNotFoundError(f'Banco não encontrado: {src_db}')
-    src = sqlite3.connect(f'file:{src_db}?mode=ro', uri=True, timeout=60.0)
+    # Conexão normal (não mode=ro): um banco em WAL sem os arquivos -wal/-shm (servidor
+    # parado) não abre em modo somente leitura.
+    src = sqlite3.connect(src_db, timeout=60.0)
     dst = sqlite3.connect(dst_path)
     try:
         src.backup(dst)
+        # A cópia vai sozinha para o ZIP: volta ao modo de journal tradicional para abrir
+        # sem arquivos auxiliares (o app religa o WAL ao usar o banco restaurado).
+        dst.execute('PRAGMA journal_mode=DELETE')
     finally:
         dst.close()
         src.close()

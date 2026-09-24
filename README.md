@@ -30,7 +30,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 ## Tecnologias
 - **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter, openpyxl (planilhas) e segno (QR code).
 - **Servidor:** Gunicorn (com `ProxyFix` no Flask se estiver atrás de um proxy).
-- **Banco:** SQLite em volume local (`data/sgc.db`).
+- **Banco:** SQLite em volume local (`data/sgc.db`), em modo WAL (arquivos auxiliares `sgc.db-wal`/`sgc.db-shm` fazem parte do banco: não os apague com o servidor rodando).
 - **Frontend:** HTML5, CSS3, Bootstrap 5.3.2, Font Awesome 6.4.2 e Cropper.js 1.6.1 — servidos localmente a partir de `app/static/vendor/` (a interface funciona **sem acesso à internet**). Para atualizar uma biblioteca, substitua a pasta pela nova versão (o nome da pasta inclui a versão, o que permite cache longo no navegador) e ajuste os caminhos nos templates.
 - **Infra (opcional):** ficheiros Docker Compose e Nginx no repositório para quem preferir esse modelo de deploy.
 

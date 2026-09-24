@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import zipfile
 
 from backup_service import abrir_zip, zip_criptografado
@@ -122,7 +123,21 @@ def aplicar_restauracao(
     dst_new = dst_db + '.novo'
 
     shutil.copy2(src_db, dst_new)
+    # Banco em WAL: grava o que estiver no -wal no banco atual e remove -wal/-shm antes da troca.
+    # Um -wal antigo ao lado do banco novo seria aplicado a ele e o corromperia.
+    if os.path.isfile(dst_db):
+        try:
+            conn = sqlite3.connect(dst_db, timeout=30)
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.close()
+        except sqlite3.Error as exc:
+            log.warning('Checkpoint do WAL antes da restauração falhou: %s', exc)
     os.replace(dst_new, dst_db)
+    for sufixo in ('-wal', '-shm'):
+        try:
+            os.remove(dst_db + sufixo)
+        except FileNotFoundError:
+            pass
     log.info('Banco substituído: %s', dst_db)
 
     src_fotos = os.path.join(extract_root, 'fotos')
