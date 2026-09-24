@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Importar Associados{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header card-header-agmeal d-flex justify-content-between align-items-center">
+        <span><i class="fa-solid fa-file-import me-2"></i>Importar associados de planilha</span>
+        <a href="{{ url_for('listar_todos') }}" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Voltar</a>
+    </div>
+    <div class="card-body">
+        {% if not previa %}
+        <ol class="mb-4">
+            <li>Baixe o <a href="{{ url_for('importar_modelo') }}"><i class="fa-solid fa-file-excel me-1"></i>modelo de planilha</a>
+                (ou use uma planilha exportada por este sistema).</li>
+            <li>Preencha uma linha por associado. A aba <em>Instruções</em> do modelo explica cada coluna.</li>
+            <li>Envie o arquivo abaixo. Você verá uma <strong>pré-visualização</strong> com os erros de cada linha
+                antes de qualquer coisa ser gravada.</li>
+        </ol>
+        <form action="{{ url_for('importar_associados') }}" method="POST" enctype="multipart/form-data"
+              class="form-submit-loading" data-loading-label="Lendo planilha…">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label fw-bold" for="arquivo">Arquivo (.xlsx ou .csv)</label>
+                    <input type="file" class="form-control" name="arquivo" id="arquivo" accept=".xlsx,.csv" required>
+                </div>
+                <div class="col-md-4 d-grid">
+                    <button type="submit" class="btn btn-primary-agmeal fw-bold"><i class="fa-solid fa-magnifying-glass me-2"></i>Pré-visualizar</button>
+                </div>
+            </div>
+        </form>
+        <p class="small text-muted mt-3 mb-0">Só cria cadastros novos: matrícula ou CPF já existentes são apontados como erro. Fotos não são importadas.</p>
+        {% else %}
+        <p class="mb-2">Arquivo <code>{{ nome_arquivo }}</code>: <strong>{{ previa|length }}</strong> linha(s) lida(s).</p>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="badge text-bg-success fs-6"><i class="fa-solid fa-check me-1"></i>{{ validas }} pronta(s) para importar</span>
+            {% if com_erro %}<span class="badge text-bg-danger fs-6"><i class="fa-solid fa-xmark me-1"></i>{{ com_erro }} com erro (serão ignoradas)</span>{% endif %}
+        </div>
+        {% if ignoradas %}
+        <p class="small text-muted">Colunas não reconhecidas (ignoradas): {{ ignoradas|join(', ') }}</p>
+        {% endif %}
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            {% if validas %}
+            <form action="{{ url_for('importar_confirmar') }}" method="POST" class="form-submit-loading" data-loading-label="Importando…"
+                  data-confirmar="Importar {{ validas }} associado(s) agora?{% if com_erro %}&#10;&#10;As {{ com_erro }} linha(s) com erro serão ignoradas.{% endif %}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="btn btn-success fw-bold"><i class="fa-solid fa-file-import me-2"></i>Importar {{ validas }} associado(s)</button>
+            </form>
+            {% endif %}
+            <form action="{{ url_for('importar_cancelar') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="btn btn-outline-secondary">Cancelar</button>
+            </form>
+        </div>
+        {% if com_erro %}
+        <p class="small mb-2"><i class="fa-solid fa-circle-info me-1 text-primary"></i>Para importar as linhas com erro, corrija a planilha e envie de novo (as já importadas passarão a aparecer como "já existe").</p>
+        {% endif %}
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead class="table-light">
+                    <tr><th>Linha</th><th>Matrícula</th><th>Nome</th><th>Resultado</th></tr>
+                </thead>
+                <tbody>
+                    {% for r in previa|sort(attribute='linha')|sort(attribute='ok') %}
+                    {% if loop.index <= 1000 %}
+                    <tr class="{{ 'table-danger' if r.erros }}">
+                        <td>{{ r.linha }}</td>
+                        <td>{{ r.matricula }}</td>
+                        <td>{{ r.nome }}{% if r.dependentes %} <small class="text-muted">+{{ r.dependentes|length }} dependente(s)</small>{% endif %}</td>
+                        <td>
+                            {% if r.erros %}
+                            <ul class="mb-0 ps-3 small text-danger">{% for e in r.erros %}<li>{{ e }}</li>{% endfor %}</ul>
+                            {% else %}
+                            <span class="text-success"><i class="fa-solid fa-check"></i> OK</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if previa|length > 1000 %}<p class="small text-muted">Mostrando as primeiras 1000 linhas (erros primeiro).</p>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

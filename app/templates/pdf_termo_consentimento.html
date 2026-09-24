@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<style>
+    @page { size: A4; margin: 1.6cm 2cm; }
+    body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.42; }
+    .topo { display: flex; align-items: center; gap: 12px; border-bottom: 3px solid #0A2342; padding-bottom: 8px; margin-bottom: 18px; }
+    .topo img { width: 52px; height: 52px; }
+    h1 { font-size: 15pt; color: #0A2342; margin: 0; }
+    h2 { font-size: 10.5pt; color: #0A2342; margin: 12px 0 4px; }
+    .sub { color: #B8962F; font-size: 9.5pt; }
+    .dados { background: #f3f5f9; padding: 8px 12px; border-radius: 4px; }
+    ul { margin: 4px 0; padding-left: 18px; }
+    .assinatura { margin-top: 40px; display: flex; gap: 40px; }
+    .assinatura div { flex: 1; border-top: 1px solid #333; padding-top: 4px; text-align: center; font-size: 9pt; }
+    .rodape { margin-top: 24px; font-size: 8pt; color: #6b7280; }
+</style>
+</head>
+<body>
+    <div class="topo">
+        <img src="{{ logo_uri }}">
+        <div>
+            <h1>Termo de Consentimento para Tratamento de Dados Pessoais</h1>
+            <div class="sub">AGMEAL — Associação dos Guardas Municipais de Alagoas · Lei nº 13.709/2018 (LGPD) · Versão {{ versao }}</div>
+        </div>
+    </div>
+
+    <div class="dados">
+        <strong>Titular:</strong> {{ a.nome }}<br>
+        <strong>CPF:</strong> {{ a.cpf }} &nbsp;·&nbsp; <strong>Matrícula:</strong> {{ a.matricula }}
+    </div>
+
+    <h2>1. Dados tratados</h2>
+    <p>Nome, CPF, RG, data de nascimento, e-mail, telefones, endereço, foto, datas de admissão e de situação
+    na associação e, quando informados, nome, parentesco, data de nascimento e CPF dos dependentes.</p>
+
+    <h2>2. Finalidades</h2>
+    <ul>
+        <li>Manter o cadastro de associados e a relação associativa;</li>
+        <li>Emitir fichas cadastrais e a carteirinha de associado;</li>
+        <li>Comunicar-se com o associado sobre assuntos da associação;</li>
+        <li>Cumprir obrigações legais, estatutárias e de prestação de contas.</li>
+    </ul>
+
+    <h2>3. Compartilhamento e guarda</h2>
+    <p>Os dados ficam armazenados no sistema da associação, com acesso restrito a usuários autorizados e
+    registro de auditoria. Não são vendidos nem cedidos a terceiros, salvo por obrigação legal. As cópias de
+    segurança seguem as mesmas regras de acesso.</p>
+
+    <h2>4. Direitos do titular</h2>
+    <p>O titular pode, a qualquer momento, solicitar à associação: confirmação e acesso aos seus dados;
+    correção de dados incompletos ou desatualizados; cópia dos dados; anonimização ou eliminação dos dados
+    desnecessários após o desligamento; e revogação deste consentimento, sem prejuízo dos tratamentos já
+    realizados e dos exigidos por lei.</p>
+
+    <h2>5. Consentimento</h2>
+    <p>Declaro que li este termo e autorizo a AGMEAL a tratar meus dados pessoais e os dos meus dependentes
+    para as finalidades acima.</p>
+
+    <p>Maceió/AL, ____ de ____________________ de ________.</p>
+
+    <div class="assinatura">
+        <div>{{ a.nome }}<br>Titular</div>
+        <div>Responsável pela AGMEAL</div>
+    </div>
+
+    <p class="rodape">Documento gerado pelo SGC-AGMEAL em {{ hoje.strftime('%d/%m/%Y') }}. Após a assinatura, registre o
+    consentimento no cadastro do associado (seção "Privacidade (LGPD)").</p>
+</body>
+</html>

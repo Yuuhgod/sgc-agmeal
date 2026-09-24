@@ -10,6 +10,24 @@
     </div>
 </div>
 
+{% if situacao_backup and situacao_backup.alerta %}
+<div class="alert alert-warning d-flex align-items-start gap-3 no-auto-close" role="alert">
+    <i class="fa-solid fa-triangle-exclamation fa-lg mt-1"></i>
+    <div class="flex-grow-1">
+        {% if situacao_backup.falhou %}
+        <strong>O último backup falhou.</strong>
+        <span class="d-block small">{{ situacao_backup.status.erro or 'Veja o log do servidor.' }}</span>
+        {% elif situacao_backup.idade_horas is none %}
+        <strong>Nenhum backup foi feito ainda.</strong>
+        {% else %}
+        <strong>O último backup tem {{ situacao_backup.idade_dias|round(0, 'floor')|int }} dias.</strong>
+        {% endif %}
+        <span class="d-block small">Sem backup recente, uma falha no computador pode apagar todos os cadastros.</span>
+    </div>
+    <a href="{{ url_for('admin_backup') }}" class="btn btn-sm btn-dark">Fazer backup agora</a>
+</div>
+{% endif %}
+
 <div class="row">
     <div class="col-md-4 mb-4">
         <div class="card shadow-sm h-100 text-center">

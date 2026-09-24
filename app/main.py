@@ -1,5 +1,8 @@
 import base64
 import binascii
+import hashlib
+import hmac
+import json
 import logging
 import os
 import re
@@ -13,6 +16,7 @@ from pathlib import Path
 
 from flask import (
     Flask,
+    abort,
     current_app,
     flash,
     make_response,
@@ -26,18 +30,25 @@ from flask import (
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
+import segno
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import extract, inspect, text
 from sqlalchemy.orm import selectinload
 from weasyprint import HTML
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.datastructures import MultiDict
 from werkzeug.utils import secure_filename
 
 from database import (
+    ACAO_ASSOCIADO_ANONIMIZAR,
+    ACAO_ASSOCIADO_CARTEIRINHA,
+    ACAO_ASSOCIADO_CONSENTIMENTO,
     ACAO_ASSOCIADO_CRIAR,
+    ACAO_ASSOCIADO_DADOS_TITULAR,
     ACAO_ASSOCIADO_EDITAR,
     ACAO_ASSOCIADO_EXCLUIR,
     ACAO_ASSOCIADO_EXPORTAR,
+    ACAO_ASSOCIADO_IMPORTAR,
     ACAO_AUTH_LOGIN,
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
@@ -218,7 +229,9 @@ def _gerar_nome_foto(matricula, extensao):
 
 db.init_app(app)
 
+import backup_agendador
 from backup_service import criar_backup_zip, listar_backups_locais
+from importacao_service import PlanilhaInvalida, gerar_modelo_xlsx, ler_planilha, separar_dependentes
 from planilha_service import gerar_csv, gerar_xlsx
 from restore_service import aplicar_restauracao, extrair_zip_seguro
 
@@ -242,6 +255,61 @@ def _backup_keep_sync():
 def _backup_sync_dir():
     d = os.environ.get('BACKUP_SYNC_DIR', '').strip()
     return d or None
+
+
+def _env_float(nome, padrao, minimo):
+    try:
+        return max(minimo, float(os.environ.get(nome, padrao)))
+    except ValueError:
+        return float(padrao)
+
+
+# Backup automático: ligado por padrão; gera quando o último tiver mais que o intervalo.
+BACKUP_AUTO = os.environ.get('BACKUP_AUTO', '1').lower() not in ('0', 'false', 'no', 'nao', 'não')
+BACKUP_AUTO_INTERVALO_HORAS = _env_float('BACKUP_AUTO_INTERVALO_HORAS', '24', 1)
+# O painel alerta os admins se o backup mais recente for mais velho que isto.
+BACKUP_ALERTA_DIAS = _env_float('BACKUP_ALERTA_DIAS', '3', 1)
+
+
+def _executar_backup_automatico():
+    info = criar_backup_zip(
+        data_dir=data_dir,
+        upload_folder=UPLOAD_FOLDER,
+        backups_dir=backups_dir,
+        sync_dir=_backup_sync_dir(),
+        keep_local=_backup_keep_local(),
+        keep_sync=_backup_keep_sync(),
+        log=app.logger,
+    )
+    # Fora de uma requisição: grava a auditoria direto (sem sessão/IP).
+    db.session.add(Auditoria(
+        usuario_id=None,
+        usuario_username='backup-automático',
+        acao=ACAO_SISTEMA_BACKUP,
+        entidade='backup',
+        descricao='Backup ZIP (automático)',
+        detalhes=f"arquivo={info['zip_filename']}\ntamanho_bytes={info['size_bytes']}\n"
+                 f"copia_nuvem={'sim' if info['sync_path'] else 'não'}",
+    ))
+    db.session.commit()
+    return info
+
+
+def _situacao_backup():
+    """Resumo para a interface: idade do último backup, último erro e se merece alerta."""
+    idade = backup_agendador.idade_ultimo_backup_horas(backups_dir, listar_backups_locais)
+    status = backup_agendador.ler_status(backups_dir)
+    falhou = bool(status.get('ultima_falha')) and (status.get('ultima_falha') or '') > (status.get('ultimo_sucesso') or '')
+    return {
+        'idade_horas': idade,
+        'idade_dias': None if idade is None else idade / 24,
+        'status': status,
+        'falhou': falhou,
+        'alerta': falhou or idade is None or idade > BACKUP_ALERTA_DIAS * 24,
+        'automatico': BACKUP_AUTO,
+        'intervalo_horas': BACKUP_AUTO_INTERVALO_HORAS,
+        'alerta_dias': BACKUP_ALERTA_DIAS,
+    }
 
 
 def _exportar_pdf_max_sem_filtro() -> int:
@@ -293,6 +361,10 @@ COLUNAS_NOVAS = {
         ('situacao', "VARCHAR(20) NOT NULL DEFAULT 'ativo'"),
         ('situacao_data', 'DATE'),
         ('situacao_motivo', 'VARCHAR(200)'),
+        ('consentimento_data', 'DATETIME'),
+        ('consentimento_versao', 'VARCHAR(20)'),
+        ('consentimento_por', 'VARCHAR(80)'),
+        ('anonimizado_em', 'DATETIME'),
     ),
     'usuarios': (
         ('ativo', 'BOOLEAN NOT NULL DEFAULT 1'),
@@ -411,6 +483,20 @@ def validar_cpf(cpf):
         return False
 
     return True
+
+
+@app.before_request
+def iniciar_agendador_backup():
+    """Sobe o agendador na primeira requisição do processo (não em CLI/migrações/testes)."""
+    if BACKUP_AUTO and not app.testing:
+        backup_agendador.iniciar(
+            app,
+            data_dir=data_dir,
+            backups_dir=backups_dir,
+            executar_backup=_executar_backup_automatico,
+            listar=listar_backups_locais,
+            intervalo_horas=BACKUP_AUTO_INTERVALO_HORAS,
+        )
 
 
 @app.before_request
@@ -833,6 +919,7 @@ def dashboard():
         novos_no_mes=novos_no_mes,
         admissoes_por_ano=admissoes_por_ano,
         admissoes_max=max((n for _, n in admissoes_por_ano), default=0),
+        situacao_backup=_situacao_backup() if session.get('role') == ROLE_ADMIN else None,
     )
 
 
@@ -1078,6 +1165,7 @@ def cadastro():
                 entidade_id=novo_associado.id,
                 descricao=f'{novo_associado.nome} (matrícula {novo_associado.matricula})',
             )
+            _aplicar_consentimento(novo_associado, request.form.get('consentimento') == '1')
             db.session.commit()
             flash('Associado cadastrado com sucesso!', 'success')
             return redirect(url_for('cadastro'))
@@ -1255,6 +1343,479 @@ def exportar_planilha():
     return response
 
 
+# ---------------------------------------------------------------------------------------
+# Importação em lote
+# ---------------------------------------------------------------------------------------
+
+IMPORTACAO_PREFIXO = 'importacao_'
+_SITUACAO_POR_ROTULO = {r.lower(): k for k, r in SITUACOES_ROTULOS.items()}
+
+
+def _form_da_linha(linha):
+    """Converte uma linha da planilha no formato de formulário usado pelo cadastro."""
+    form = MultiDict({c: v for c, v in linha.items() if c not in ('situacao', 'situacao_data',
+                                                                    'situacao_motivo', 'dependentes')})
+    situacao = linha.get('situacao', '').strip()
+    if situacao:
+        form['situacao'] = _SITUACAO_POR_ROTULO.get(situacao.lower(), situacao)
+        form['situacao_data'] = linha.get('situacao_data', '')
+        form['situacao_motivo'] = linha.get('situacao_motivo', '')
+    for nome, parentesco in separar_dependentes(linha.get('dependentes', ''), PARENTESCOS, PARENTESCO_NAO_INFORMADO):
+        form.add('dep_nome', nome)
+        form.add('dep_parentesco', parentesco)
+        form.add('dep_nascimento', '')
+        form.add('dep_cpf', '')
+    return form
+
+
+def _validar_importacao(linhas):
+    """Valida cada linha com as regras do cadastro, mais duplicidade dentro da planilha."""
+    resultado, matriculas, cpfs = [], {}, {}
+    for numero, linha in linhas:
+        form = _form_da_linha(linha)
+        dados, erros = _validar_dados_associado(form)
+        dependentes, erros_dep = _validar_dependentes(form, cpf_titular=dados.get('cpf'))
+        erros += erros_dep
+        matricula, cpf = dados.get('matricula'), dados.get('cpf')
+        if matricula and matricula in matriculas:
+            erros.append(f'Matrícula repetida na planilha (linha {matriculas[matricula]}).')
+        if cpf and cpf in cpfs:
+            erros.append(f'CPF repetido na planilha (linha {cpfs[cpf]}).')
+        if matricula:
+            matriculas.setdefault(matricula, numero)
+        if cpf:
+            cpfs.setdefault(cpf, numero)
+        resultado.append({
+            'linha': numero, 'matricula': matricula or linha.get('matricula', ''),
+            'nome': dados.get('nome') or linha.get('nome', ''), 'erros': erros, 'ok': not erros,
+            'dados': dados, 'dependentes': dependentes,
+        })
+    return resultado
+
+
+def _arquivo_importacao(token, extensao):
+    if not re.fullmatch(r'[0-9a-f]{32}', token or '') or extensao not in ('csv', 'xlsx'):
+        return None
+    return os.path.join(restore_pending_dir, f'{IMPORTACAO_PREFIXO}{token}.{extensao}')
+
+
+def _limpar_importacoes_antigas(horas=24):
+    limite = time.time() - horas * 3600
+    for nome in os.listdir(restore_pending_dir):
+        caminho = os.path.join(restore_pending_dir, nome)
+        if nome.startswith(IMPORTACAO_PREFIXO) and os.path.getmtime(caminho) < limite:
+            try:
+                os.remove(caminho)
+            except OSError:
+                pass
+
+
+def _importacao_pendente():
+    """(caminho, info) da importação guardada na sessão, se o arquivo ainda existir."""
+    info = session.get('importacao') or {}
+    caminho = _arquivo_importacao(info.get('token'), info.get('extensao'))
+    if caminho and os.path.isfile(caminho):
+        return caminho, info
+    return None, None
+
+
+@app.route('/associados/importar/modelo')
+@admin_required
+def importar_modelo():
+    response = make_response(gerar_modelo_xlsx(PARENTESCOS, list(SITUACOES_ROTULOS.values())))
+    response.headers['Content-Type'] = FORMATOS_PLANILHA['xlsx'][0]
+    response.headers['Content-Disposition'] = 'attachment; filename=modelo_importacao_associados.xlsx'
+    return response
+
+
+@app.route('/associados/importar', methods=['GET', 'POST'])
+@admin_required
+def importar_associados():
+    if request.method == 'GET':
+        return render_template('importar.html', username=session.get('username'), previa=None)
+
+    upload = request.files.get('arquivo')
+    nome_original = secure_filename(upload.filename) if upload and upload.filename else ''
+    extensao = nome_original.rsplit('.', 1)[-1].lower() if '.' in nome_original else ''
+    if extensao not in ('csv', 'xlsx'):
+        flash('Selecione um arquivo .xlsx ou .csv.', 'warning')
+        return redirect(url_for('importar_associados'))
+
+    conteudo = upload.read()
+    try:
+        linhas, ignoradas = ler_planilha(conteudo, extensao)
+    except PlanilhaInvalida as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('importar_associados'))
+
+    # Guarda o arquivo para a confirmação (revalidada lá, pois o banco pode mudar entre as etapas).
+    _limpar_importacoes_antigas()
+    anterior, _ = _importacao_pendente()
+    if anterior:
+        os.remove(anterior)
+    token = uuid.uuid4().hex
+    with open(_arquivo_importacao(token, extensao), 'wb') as fh:
+        fh.write(conteudo)
+    session['importacao'] = {'token': token, 'extensao': extensao, 'nome': nome_original}
+
+    previa = _validar_importacao(linhas)
+    return render_template(
+        'importar.html',
+        username=session.get('username'),
+        previa=previa,
+        validas=sum(1 for r in previa if not r['erros']),
+        com_erro=sum(1 for r in previa if r['erros']),
+        ignoradas=ignoradas,
+        nome_arquivo=nome_original,
+    )
+
+
+@app.route('/associados/importar/confirmar', methods=['POST'])
+@admin_required
+def importar_confirmar():
+    caminho, info = _importacao_pendente()
+    if not caminho:
+        flash('A pré-visualização expirou. Envie a planilha novamente.', 'warning')
+        return redirect(url_for('importar_associados'))
+
+    try:
+        with open(caminho, 'rb') as fh:
+            linhas, _ = ler_planilha(fh.read(), info['extensao'])
+        validas = [r for r in _validar_importacao(linhas) if not r['erros']]
+        if not validas:
+            flash('Nenhuma linha válida para importar.', 'warning')
+            return redirect(url_for('importar_associados'))
+
+        # Tudo numa transação: ou entram todas as linhas válidas, ou nenhuma.
+        for r in validas:
+            associado = Associado(**r['dados'])
+            associado.dependentes = [Dependente(**d) for d in r['dependentes']]
+            db.session.add(associado)
+        matriculas = ', '.join(r['dados']['matricula'] for r in validas)
+        registrar_auditoria(
+            ACAO_ASSOCIADO_IMPORTAR,
+            entidade='associado',
+            descricao=f"{len(validas)} associado(s) importado(s) de {info.get('nome') or 'planilha'}",
+            detalhes=f'matrículas: {matriculas}'[:4000],
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Erro ao importar associados')
+        flash('Erro inesperado ao importar. Nada foi gravado; tente novamente.', 'danger')
+        return redirect(url_for('importar_associados'))
+    finally:
+        session.pop('importacao', None)
+        if os.path.isfile(caminho):
+            os.remove(caminho)
+
+    app.logger.info('Importação por %s: %s associados', session.get('username'), len(validas))
+    flash(f'{len(validas)} associado(s) importado(s) com sucesso.', 'success')
+    return redirect(url_for('listar_todos'))
+
+
+@app.route('/associados/importar/cancelar', methods=['POST'])
+@admin_required
+def importar_cancelar():
+    caminho, _ = _importacao_pendente()
+    if caminho:
+        os.remove(caminho)
+    session.pop('importacao', None)
+    flash('Importação cancelada. Nada foi gravado.', 'info')
+    return redirect(url_for('importar_associados'))
+
+
+# ---------------------------------------------------------------------------------------
+# Carteirinha com QR code de verificação
+# ---------------------------------------------------------------------------------------
+
+CARTEIRINHA_VALIDADE_MESES = int(_env_float('CARTEIRINHA_VALIDADE_MESES', '12', 1))
+
+
+def _somar_meses(data, meses):
+    ano, mes = divmod(data.month - 1 + meses, 12)
+    ano, mes = data.year + ano, mes + 1
+    ultimo_dia = [31, 29 if ano % 4 == 0 and (ano % 100 or ano % 400 == 0) else 28,
+                  31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1]
+    return data.replace(year=ano, month=mes, day=min(data.day, ultimo_dia))
+
+
+def _assinatura_carteirinha(associado_id, matricula, emissao):
+    """HMAC da carteirinha: muda se a matrícula ou a data de emissão mudarem, e não pode
+    ser calculado sem a SECRET_KEY (ninguém gera links válidos trocando números)."""
+    mensagem = f'carteirinha:{associado_id}:{matricula}:{emissao:%Y%m%d}'.encode()
+    digest = hmac.new(app.config['SECRET_KEY'].encode(), mensagem, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest[:12]).decode().rstrip('=')
+
+
+def _url_verificacao(associado, emissao):
+    caminho = url_for(
+        'verificar_carteirinha', associado_id=associado.id, emissao=emissao.strftime('%Y%m%d'),
+        assinatura=_assinatura_carteirinha(associado.id, associado.matricula, emissao),
+    )
+    # O QR é lido por celulares na rede: use o endereço do servidor na rede local, se configurado.
+    base = (os.environ.get('SGC_URL_PUBLICA') or request.url_root).rstrip('/')
+    return base + caminho
+
+
+@app.route('/carteirinha/<int:id>')
+@login_required
+def carteirinha(id):
+    associado = db.session.get(Associado, id)
+    if associado is None:
+        flash('Associado não encontrado.', 'danger')
+        return redirect(url_for('buscar'))
+    if associado.situacao != SITUACAO_ATIVO:
+        flash(f'Carteirinha só é emitida para associados ativos ({associado.nome} está '
+              f'{associado.situacao_rotulo.lower()}).', 'warning')
+        return redirect(url_for('editar', id=id))
+
+    emissao = datetime.now().date()
+    url = _url_verificacao(associado, emissao)
+    qr_svg = segno.make(url, error='m').svg_data_uri(scale=4, border=1, dark='#0A2342')
+    html = render_template(
+        'pdf_carteirinha.html',
+        a=associado,
+        emissao=emissao,
+        validade=_somar_meses(emissao, CARTEIRINHA_VALIDADE_MESES),
+        qr_svg=qr_svg,
+        url_verificacao=url,
+        logo_uri=Path(basedir, 'static', 'img', 'logo.jpeg').as_uri(),
+        fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
+    )
+    pdf = HTML(string=html).write_pdf()
+    registrar_auditoria(
+        ACAO_ASSOCIADO_CARTEIRINHA,
+        entidade='associado',
+        entidade_id=associado.id,
+        descricao=f'{associado.nome} (matrícula {associado.matricula})',
+        detalhes=f'emissão {emissao:%d/%m/%Y}',
+        commit=True,
+    )
+    response = make_response(pdf)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'inline; filename=carteirinha_{secure_filename(associado.matricula)}.pdf'
+    return response
+
+
+@app.route('/verificar/<int:associado_id>/<emissao>/<assinatura>')
+@limiter.limit('30 per minute')
+def verificar_carteirinha(associado_id, emissao, assinatura):
+    """Página pública (sem login) aberta pelo QR: mostra só nome, matrícula e situação."""
+    associado = db.session.get(Associado, associado_id)
+    try:
+        data_emissao = datetime.strptime(emissao, '%Y%m%d').date()
+    except ValueError:
+        data_emissao = None
+    valida = (
+        associado is not None and data_emissao is not None
+        and hmac.compare_digest(
+            assinatura, _assinatura_carteirinha(associado.id, associado.matricula, data_emissao),
+        )
+    )
+    if not valida:
+        return render_template('verificar_carteirinha.html', valida=False), 404
+
+    validade = _somar_meses(data_emissao, CARTEIRINHA_VALIDADE_MESES)
+    hoje = datetime.now().date()
+    return render_template(
+        'verificar_carteirinha.html',
+        valida=True,
+        a=associado,
+        emissao=data_emissao,
+        validade=validade,
+        vencida=hoje > validade,
+        ativo=associado.situacao == SITUACAO_ATIVO,
+    )
+
+
+# ---------------------------------------------------------------------------------------
+# LGPD: consentimento, dados do titular e anonimização
+# ---------------------------------------------------------------------------------------
+
+TERMO_CONSENTIMENTO_VERSAO = '1.0'
+ANONIMIZAR_CONFIRMACAO = 'ANONIMIZAR'
+
+
+def _aplicar_consentimento(associado, marcado):
+    """Registra (ou revoga) o consentimento conforme a caixa do formulário e audita a mudança."""
+    if marcado and associado.consentimento_versao != TERMO_CONSENTIMENTO_VERSAO:
+        associado.consentimento_data = datetime.now()
+        associado.consentimento_versao = TERMO_CONSENTIMENTO_VERSAO
+        associado.consentimento_por = session.get('username')
+        acao = f'registrado (termo versão {TERMO_CONSENTIMENTO_VERSAO})'
+    elif not marcado and associado.consentimento_data:
+        associado.consentimento_data = associado.consentimento_versao = associado.consentimento_por = None
+        acao = 'revogado'
+    else:
+        return
+    registrar_auditoria(
+        ACAO_ASSOCIADO_CONSENTIMENTO,
+        entidade='associado',
+        entidade_id=associado.id,
+        descricao=f'{associado.nome} (matrícula {associado.matricula})',
+        detalhes=f'consentimento {acao}',
+    )
+
+
+def _data_iso(valor):
+    return valor.isoformat() if valor else None
+
+
+@app.route('/associado/<int:id>/termo_consentimento')
+@login_required
+def termo_consentimento(id):
+    """Termo de consentimento preenchido, para impressão e assinatura do associado."""
+    associado = Associado.query.get_or_404(id)
+    if associado.anonimizado_em:
+        abort(404)
+    html = render_template(
+        'pdf_termo_consentimento.html',
+        a=associado,
+        versao=TERMO_CONSENTIMENTO_VERSAO,
+        hoje=datetime.now().date(),
+        logo_uri=Path(basedir, 'static', 'img', 'logo.jpeg').as_uri(),
+    )
+    response = make_response(HTML(string=html).write_pdf())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'inline; filename=termo_{secure_filename(associado.matricula)}.pdf'
+    return response
+
+
+@app.route('/associado/<int:id>/dados_titular')
+@admin_required
+def dados_titular(id):
+    """Direito de acesso (LGPD art. 18): tudo o que o sistema guarda sobre o associado, em JSON."""
+    a = Associado.query.get_or_404(id)
+    historico = (
+        Auditoria.query.filter_by(entidade='associado', entidade_id=a.id)
+        .order_by(Auditoria.data_hora).all()
+    )
+    dados = {
+        'gerado_em': datetime.now().isoformat(timespec='seconds'),
+        'controlador': 'AGMEAL - Associação dos Guardas Municipais de Alagoas',
+        'associado': {
+            'nome': a.nome, 'matricula': a.matricula, 'cpf': a.cpf, 'rg': a.rg,
+            'data_nascimento': _data_iso(a.data_nascimento), 'email': a.email,
+            'telefone': a.telefone, 'whatsapp': a.telefone_whatsapp, 'endereco': a.endereco,
+            'data_admissao': _data_iso(a.data_admissao),
+            'situacao': a.situacao_rotulo, 'situacao_desde': _data_iso(a.situacao_data),
+            'situacao_motivo': a.situacao_motivo,
+            'possui_foto': bool(a.foto_perfil),
+            'cadastrado_em': a.data_criacao.isoformat(timespec='seconds') if a.data_criacao else None,
+        },
+        'dependentes': [
+            {'nome': d.nome, 'parentesco': d.parentesco,
+             'data_nascimento': _data_iso(d.data_nascimento), 'cpf': d.cpf}
+            for d in a.dependentes
+        ],
+        'consentimento': {
+            'registrado': bool(a.consentimento_data),
+            'data': a.consentimento_data.isoformat(timespec='seconds') if a.consentimento_data else None,
+            'versao_termo': a.consentimento_versao,
+            'registrado_por': a.consentimento_por,
+        },
+        'historico_de_tratamento': [
+            {'data_hora': h.data_hora.isoformat(timespec='seconds'), 'acao': h.rotulo,
+             'usuario': h.usuario_username, 'detalhes': h.detalhes}
+            for h in historico
+        ],
+    }
+    registrar_auditoria(
+        ACAO_ASSOCIADO_DADOS_TITULAR,
+        entidade='associado',
+        entidade_id=a.id,
+        descricao=f'{a.nome} (matrícula {a.matricula})',
+        commit=True,
+    )
+    response = make_response(json.dumps(dados, ensure_ascii=False, indent=2))
+    response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    response.headers['Content-Disposition'] = f'attachment; filename=dados_titular_{secure_filename(a.matricula)}.json'
+    return response
+
+
+def _limpar_auditoria_do_titular(associado_id, termos):
+    """Remove dados pessoais do texto da auditoria: os registros do próprio associado perdem a
+    descrição/detalhes, e nos demais (ex.: importações) nome/CPF/matrícula são substituídos."""
+    marcador = f'[anonimizado #{associado_id}]'
+    for log in Auditoria.query.filter_by(entidade='associado', entidade_id=associado_id):
+        log.descricao, log.detalhes = marcador, None
+
+    termos = [t for t in termos if t and len(t) >= 3]
+    if not termos:
+        return
+    filtro = db.or_(*(db.or_(Auditoria.descricao.contains(t), Auditoria.detalhes.contains(t)) for t in termos))
+    padroes = [re.compile(rf'(?<![\w-]){re.escape(t)}(?![\w-])') for t in termos]
+    for log in Auditoria.query.filter(filtro):
+        for campo in ('descricao', 'detalhes'):
+            texto = getattr(log, campo)
+            if texto:
+                for padrao in padroes:
+                    texto = padrao.sub(marcador, texto)
+                setattr(log, campo, texto[:200] if campo == 'descricao' else texto)
+
+
+@app.route('/associado/<int:id>/anonimizar', methods=['GET', 'POST'])
+@admin_required
+def anonimizar_associado(id):
+    """Anonimização (LGPD art. 16/18): apaga os dados pessoais, mantendo só o que serve às
+    estatísticas (situação, admissão e ano de nascimento). Irreversível."""
+    a = Associado.query.get_or_404(id)
+    if a.anonimizado_em:
+        flash('Este cadastro já foi anonimizado.', 'info')
+        return redirect(url_for('buscar'))
+    if a.situacao == SITUACAO_ATIVO:
+        flash('Só é possível anonimizar associados inativos ou desligados. Altere a situação antes.', 'warning')
+        return redirect(url_for('editar', id=id))
+
+    if request.method == 'GET':
+        return render_template('anonimizar.html', username=session.get('username'), a=a,
+                               confirmacao=ANONIMIZAR_CONFIRMACAO)
+
+    if request.form.get('confirmacao', '').strip() != ANONIMIZAR_CONFIRMACAO:
+        flash(f'Digite exatamente {ANONIMIZAR_CONFIRMACAO} para confirmar.', 'danger')
+        return redirect(url_for('anonimizar_associado', id=id))
+
+    termos = [a.nome, a.cpf, a.matricula, re.sub(r'\D', '', a.cpf or '')] + [d.nome for d in a.dependentes] \
+        + [d.cpf for d in a.dependentes if d.cpf]
+    foto = a.foto_perfil
+    codigo = f'ANON-{a.id:06d}'
+    try:
+        a.nome = f'Associado anonimizado #{a.id}'
+        a.matricula = codigo
+        a.cpf = codigo
+        a.rg = a.email = a.endereco = ''
+        a.telefone = a.telefone_whatsapp = None
+        a.data_nascimento = a.data_nascimento.replace(month=1, day=1)
+        a.foto_perfil = None
+        a.dependentes = []
+        a.dependentes_texto_legado = None
+        a.situacao_motivo = None
+        a.consentimento_data = a.consentimento_versao = a.consentimento_por = None
+        a.anonimizado_em = datetime.now()
+        _limpar_auditoria_do_titular(a.id, termos)
+        registrar_auditoria(
+            ACAO_ASSOCIADO_ANONIMIZAR,
+            entidade='associado',
+            entidade_id=a.id,
+            descricao=f'Cadastro #{a.id} anonimizado',
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Erro ao anonimizar associado id=%s', id)
+        flash('Erro ao anonimizar. Nada foi alterado.', 'danger')
+        return redirect(url_for('editar', id=id))
+
+    _remover_foto_do_disco(foto)
+    flash(
+        'Cadastro anonimizado. Os backups antigos ainda contêm os dados originais até serem '
+        'substituídos pela rotação automática.',
+        'success',
+    )
+    return redirect(url_for('buscar'))
+
+
 @app.route('/exportar_ficha/<matricula>')
 @login_required
 def exportar_ficha(matricula):
@@ -1303,6 +1864,9 @@ def _diff_associado(antes, associado, foto_alterada):
 @login_required
 def editar(id):
     associado = Associado.query.get_or_404(id)
+    if associado.anonimizado_em:
+        flash('Este cadastro foi anonimizado (LGPD) e não pode mais ser editado.', 'warning')
+        return redirect(url_for('buscar'))
 
     if request.method == 'POST':
         foto_anterior = associado.foto_perfil
@@ -1322,6 +1886,8 @@ def editar(id):
             for campo, valor in dados.items():
                 setattr(associado, campo, valor)
             associado.dependentes = [Dependente(**d) for d in dependentes]
+            if request.form.get('lgpd_form') == '1':  # só o formulário de edição traz a caixa
+                _aplicar_consentimento(associado, request.form.get('consentimento') == '1')
 
             foto = request.files.get('foto_perfil')
             if foto and foto.filename and allowed_file(foto.filename):
@@ -1866,6 +2432,7 @@ def admin_backup():
         username=session.get('username'),
         sync_dir=sync_dir,
         recentes=recentes,
+        situacao=_situacao_backup(),
         keep_local=_backup_keep_local(),
         keep_sync=_backup_keep_sync(),
     )
@@ -1895,11 +2462,18 @@ def admin_backup_gerar():
             keep_sync=_backup_keep_sync(),
             log=current_app.logger,
         )
-    except Exception:
+    except Exception as exc:
         current_app.logger.exception('Falha ao gerar backup')
+        agora_iso = datetime.now().isoformat(timespec='seconds')
+        backup_agendador.gravar_status(backups_dir, ultima_tentativa=agora_iso, ultima_falha=agora_iso, erro=str(exc)[:300])
         flash('Não foi possível gerar o backup. Verifique permissões de pasta e o log do servidor.', 'danger')
         return redirect(url_for('admin_backup'))
 
+    agora_iso = datetime.now().isoformat(timespec='seconds')
+    backup_agendador.gravar_status(
+        backups_dir, ultima_tentativa=agora_iso, ultimo_sucesso=agora_iso, erro=None,
+        arquivo=info['zip_filename'], copia_nuvem=bool(info['sync_path']),
+    )
     detalhes = (
         f"arquivo={info['zip_filename']}\n"
         f"tamanho_bytes={info['size_bytes']}\n"

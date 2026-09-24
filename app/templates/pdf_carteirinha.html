@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<style>
+    /* Cartão padrão CR80 (85,6 x 54 mm): página 1 = frente, página 2 = verso. */
+    @page { size: 85.6mm 54mm; margin: 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "DejaVu Sans", Arial, sans-serif; color: #0A2342; }
+    .cartao { width: 85.6mm; height: 54mm; position: relative; overflow: hidden; page-break-after: always; }
+    .cartao:last-child { page-break-after: auto; }
+    .faixa { background: #0A2342; color: #fff; height: 11mm; padding: 1.6mm 3mm; display: flex; align-items: center; gap: 2mm; }
+    .faixa img { width: 7.5mm; height: 7.5mm; border-radius: 50%; background: #fff; }
+    .faixa .titulo { font-size: 9pt; font-weight: bold; letter-spacing: .3pt; line-height: 1.1; }
+    .faixa .sub { font-size: 5.5pt; color: #D4AF37; }
+    .corpo { display: flex; gap: 3mm; padding: 2.5mm 3mm 0 3mm; }
+    .foto { width: 19mm; height: 25mm; border: .3mm solid #0A2342; object-fit: cover; }
+    .sem-foto { width: 19mm; height: 25mm; border: .3mm solid #999; color: #999; font-size: 6pt;
+                display: flex; align-items: center; justify-content: center; }
+    .dados { flex: 1; font-size: 6.5pt; }
+    .nome { font-size: 8.5pt; font-weight: bold; line-height: 1.15; margin-bottom: 1.5mm; text-transform: uppercase; }
+    .rotulo { font-size: 5pt; color: #6b7280; text-transform: uppercase; letter-spacing: .2pt; }
+    .valor { font-size: 7pt; font-weight: bold; margin-bottom: 1mm; }
+    .linha2 { display: flex; gap: 4mm; }
+    .rodape { position: absolute; bottom: 0; left: 0; right: 0; height: 3mm; background: #D4AF37; }
+    .verso { padding: 3mm; display: flex; gap: 3mm; align-items: center; height: 51mm; }
+    .verso img.qr { width: 30mm; height: 30mm; }
+    .verso .texto { font-size: 6pt; line-height: 1.35; }
+    .verso .texto strong { font-size: 7pt; }
+    .verso .url { font-size: 4.5pt; color: #6b7280; word-break: break-all; margin-top: 1.5mm; }
+</style>
+</head>
+<body>
+    <div class="cartao">
+        <div class="faixa">
+            <img src="{{ logo_uri }}">
+            <div>
+                <div class="titulo">AGMEAL</div>
+                <div class="sub">Associação dos Guardas Municipais de Alagoas</div>
+            </div>
+        </div>
+        <div class="corpo">
+            {% if a.foto_perfil %}
+            <img class="foto" src="{{ fotos_base_uri }}/{{ a.foto_perfil }}">
+            {% else %}
+            <div class="sem-foto">Sem foto</div>
+            {% endif %}
+            <div class="dados">
+                <div class="nome">{{ a.nome }}</div>
+                <div class="rotulo">Matrícula</div>
+                <div class="valor">{{ a.matricula }}</div>
+                <div class="linha2">
+                    <div>
+                        <div class="rotulo">Associado desde</div>
+                        <div class="valor">{{ a.data_admissao.strftime('%d/%m/%Y') }}</div>
+                    </div>
+                    <div>
+                        <div class="rotulo">Válida até</div>
+                        <div class="valor">{{ validade.strftime('%d/%m/%Y') }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="rodape"></div>
+    </div>
+
+    <div class="cartao">
+        <div class="verso">
+            <img class="qr" src="{{ qr_svg }}">
+            <div class="texto">
+                <strong>Carteira de associado</strong><br>
+                Aponte a câmera do celular para o código para confirmar a autenticidade
+                e a situação atual deste associado.<br><br>
+                Emitida em {{ emissao.strftime('%d/%m/%Y') }}.<br>
+                Documento pessoal e intransferível.
+                <div class="url">{{ url_verificacao }}</div>
+            </div>
+        </div>
+        <div class="rodape"></div>
+    </div>
+</body>
+</html>

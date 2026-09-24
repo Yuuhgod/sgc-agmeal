@@ -40,6 +40,35 @@ def _sqlite_backup_to_file(src_db: str, dst_path: str, log: logging.Logger) -> N
         src.close()
 
 
+def verificar_backup_zip(zip_path: str) -> None:
+    """Confere se o ZIP está íntegro e se o banco dentro dele abre sem corrupção.
+
+    Levanta ValueError com a causa se algo estiver errado."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            ruim = zf.testzip()
+            if ruim:
+                raise ValueError(f'Arquivo corrompido dentro do ZIP: {ruim}')
+            if 'data/sgc.db' not in zf.namelist():
+                return  # backup de instalação sem banco (caso raro, já sinalizado no ZIP)
+            with tempfile.TemporaryDirectory() as tmp:
+                db_tmp = zf.extract('data/sgc.db', tmp)
+                conn = sqlite3.connect(f'file:{db_tmp}?mode=ro', uri=True)
+                try:
+                    resultado = conn.execute('PRAGMA quick_check').fetchone()[0]
+                    tabelas = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                finally:
+                    conn.close()
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f'ZIP inválido: {exc}') from exc
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(f'Banco do backup não abre: {exc}') from exc
+    if resultado != 'ok':
+        raise ValueError(f'Verificação do banco falhou: {resultado}')
+    if not {'usuarios', 'associados'} <= tabelas:
+        raise ValueError('Banco do backup não contém as tabelas esperadas.')
+
+
 def _leia_me_txt() -> str:
     return """SGC-AGMEAL — backup
 ====================
@@ -147,6 +176,12 @@ def criar_backup_zip(
                         arc = os.path.join('fotos', rel).replace('\\', '/')
                         zf.write(abs_path, arcname=arc)
 
+        # Um backup que não restaura não é backup: verifica antes de contar como válido.
+        try:
+            verificar_backup_zip(zip_path)
+        except ValueError:
+            os.remove(zip_path)
+            raise
         size_bytes = os.path.getsize(zip_path)
     finally:
         if tmp_db and os.path.isfile(tmp_db):

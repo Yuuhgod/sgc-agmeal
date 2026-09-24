@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Anonimizar Associado{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-3">
+    <div class="col-lg-7">
+        <div class="card shadow-sm border-0 border-top border-danger border-3">
+            <div class="card-body p-4">
+                <h4 class="text-danger"><i class="fa-solid fa-user-slash me-2"></i>Anonimizar cadastro</h4>
+                <p class="mb-2"><strong>{{ a.nome }}</strong> — matrícula {{ a.matricula }} ({{ a.situacao_rotulo|lower }})</p>
+                <p>Use quando o titular pedir a eliminação dos dados ou quando eles não forem mais necessários.
+                   <strong>Não há como desfazer.</strong></p>
+                <div class="row small g-3 mb-3">
+                    <div class="col-md-6">
+                        <p class="fw-bold mb-1 text-danger">Será apagado</p>
+                        <ul class="mb-0">
+                            <li>Nome, CPF, RG, matrícula, e-mail, telefones e endereço</li>
+                            <li>Foto e dependentes</li>
+                            <li>Dia e mês de nascimento</li>
+                            <li>Menções a esses dados no texto da auditoria</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="fw-bold mb-1 text-success">Será mantido (estatísticas)</p>
+                        <ul class="mb-0">
+                            <li>Situação e data da situação</li>
+                            <li>Data de admissão</li>
+                            <li>Ano de nascimento</li>
+                            <li>O registro de que houve anonimização</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="alert alert-secondary small border-0">
+                    <i class="fa-solid fa-circle-info me-1"></i>Se o titular pediu cópia dos dados, exporte-os antes. Os backups
+                    antigos continuam com os dados originais até serem substituídos pela rotação automática.
+                </div>
+                <form method="POST" action="{{ url_for('anonimizar_associado', id=a.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <label class="form-label fw-bold" for="confirmacao">Para confirmar, digite <code>{{ confirmacao }}</code></label>
+                    <input type="text" class="form-control mb-3" name="confirmacao" id="confirmacao" autocomplete="off" required>
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('editar', id=a.id) }}" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-danger fw-bold">Anonimizar definitivamente</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
