@@ -133,14 +133,34 @@ if [ ! -x ".venv/bin/gunicorn" ]; then
 fi
 
 mkdir -p data app/static/uploads/fotos
+
+# Rotação do log a cada início: acima de LOG_MAX_MB vira sgc.log.1 (guarda LOG_MANTER arquivos).
+LOG_MAX_MB="${SGC_LOG_MAX_MB:-5}"
+LOG_MANTER="${SGC_LOG_MANTER:-5}"
+if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE")" -gt $((LOG_MAX_MB * 1024 * 1024)) ]; then
+    rm -f "$LOG_FILE.$LOG_MANTER"
+    for i in $(seq $((LOG_MANTER - 1)) -1 1); do
+        [ -f "$LOG_FILE.$i" ] && mv "$LOG_FILE.$i" "$LOG_FILE.$((i + 1))"
+    done
+    mv "$LOG_FILE" "$LOG_FILE.1"
+fi
+
+# Log de cada requisição só se pedido (é o que faz o arquivo crescer; a auditoria já
+# registra as ações relevantes). --capture-output leva as mensagens do app ao log.
+ACESSO=()
+if [ "${SGC_LOG_ACESSO:-0}" = "1" ]; then
+    ACESSO=(--access-logfile "$LOG_FILE")
+fi
+
 echo "Iniciando SGC-AGMEAL na porta ${PORTA} com ${WORKERS} worker(s)..."
 
 .venv/bin/gunicorn \
     --chdir "$PROJETO_DIR/app" \
     --workers "$WORKERS" \
     --bind "0.0.0.0:${PORTA}" \
-    --access-logfile "$LOG_FILE" \
+    "${ACESSO[@]}" \
     --error-logfile "$LOG_FILE" \
+    --capture-output \
     --daemon \
     --pid "$PID_FILE" \
     main:app

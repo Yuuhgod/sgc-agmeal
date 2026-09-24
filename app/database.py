@@ -1,9 +1,29 @@
+import sqlite3
+import unicodedata
 from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+def normalizar_busca(texto):
+    """'João da CONCEIÇÃO' -> 'joao da conceicao' (sem acentos, sem diferença de maiúsculas)."""
+    if texto is None:
+        return None
+    decomposto = unicodedata.normalize('NFKD', str(texto))
+    return ''.join(c for c in decomposto if not unicodedata.combining(c)).casefold()
+
+
+@event.listens_for(Engine, 'connect')
+def _registrar_funcoes_sqlite(conexao, _registro):
+    # O LIKE do SQLite só ignora maiúsculas em letras ASCII ("joão" não acha "JOÃO").
+    # sem_acento() permite buscar sem se preocupar com acentos nem maiúsculas.
+    if isinstance(conexao, sqlite3.Connection):
+        conexao.create_function('sem_acento', 1, normalizar_busca, deterministic=True)
 
 
 def _agora_utc():

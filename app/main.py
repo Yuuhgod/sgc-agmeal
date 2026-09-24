@@ -13,6 +13,8 @@ import uuid
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from flask import (
     Flask,
@@ -35,6 +37,7 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import extract, inspect, text
 from sqlalchemy.orm import selectinload
 from weasyprint import HTML
+from weasyprint.urls import URLFetcher
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.datastructures import MultiDict
 from werkzeug.utils import secure_filename
@@ -76,6 +79,7 @@ from database import (
     SITUACOES_ROTULOS,
     Usuario,
     db,
+    normalizar_busca,
 )
 
 app = Flask(__name__)
@@ -228,6 +232,32 @@ def _gerar_nome_foto(matricula, extensao):
 
 
 db.init_app(app)
+
+STATIC_DIR = os.path.join(basedir, 'static')
+LOGO_PDF_URI = Path(STATIC_DIR, 'img', 'logo.jpeg').as_uri()
+app.jinja_env.globals['LOGO_PDF_URI'] = LOGO_PDF_URI
+
+
+class _BuscadorRecursosPDF(URLFetcher):
+    """Recursos dos PDFs vêm só do disco (pastas static e de fotos) ou de data: URIs.
+
+    Buscar por HTTP no próprio servidor travava o worker que gera o PDF: com os workers
+    ocupados, o WeasyPrint esperava ~10 s e o PDF saía sem o logo."""
+
+    def __init__(self):
+        super().__init__(allowed_protocols=('file', 'data'), timeout=5)
+
+    def fetch(self, url, headers=None):
+        if url.startswith('file:'):
+            caminho = os.path.realpath(url2pathname(urlparse(url).path))
+            permitidos = (os.path.realpath(STATIC_DIR), os.path.realpath(UPLOAD_FOLDER))
+            if not any(caminho.startswith(p + os.sep) for p in permitidos):
+                raise ValueError(f'Arquivo fora das pastas permitidas no PDF: {caminho}')
+        return super().fetch(url, headers)
+
+
+def gerar_pdf(html):
+    return HTML(string=html, base_url=Path(STATIC_DIR).as_uri() + '/', url_fetcher=_BuscadorRecursosPDF()).write_pdf()
 
 import backup_agendador
 from backup_service import criar_backup_zip, listar_backups_locais
@@ -1197,10 +1227,17 @@ def _filtros_texto_vazios(filtros):
     return not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
 
 
+def _contem_texto(coluna, termo):
+    """Filtro 'contém', sem diferenciar acentos nem maiúsculas; % e _ digitados são literais."""
+    termo = normalizar_busca(termo.strip())
+    termo = termo.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return db.func.sem_acento(coluna).like(f'%{termo}%', escape='\\')
+
+
 def _aplicar_filtros_busca(query, filtros):
     """Aplica os filtros à consulta. Levanta ValueError se o ano não for numérico."""
     if filtros['nome']:
-        query = query.filter(Associado.nome.ilike(f"%{filtros['nome']}%"))
+        query = query.filter(_contem_texto(Associado.nome, filtros['nome']))
     if filtros['matricula']:
         query = query.filter(Associado.matricula == filtros['matricula'])
     if filtros['ano']:
@@ -1287,7 +1324,7 @@ def exportar_pdf():
         fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
     )
 
-    pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
+    pdf = gerar_pdf(html_renderizado)
 
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
@@ -1580,10 +1617,10 @@ def carteirinha(id):
         validade=_somar_meses(emissao, CARTEIRINHA_VALIDADE_MESES),
         qr_svg=qr_svg,
         url_verificacao=url,
-        logo_uri=Path(basedir, 'static', 'img', 'logo.jpeg').as_uri(),
+        logo_uri=LOGO_PDF_URI,
         fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
     )
-    pdf = HTML(string=html).write_pdf()
+    pdf = gerar_pdf(html)
     registrar_auditoria(
         ACAO_ASSOCIADO_CARTEIRINHA,
         entidade='associado',
@@ -1674,9 +1711,9 @@ def termo_consentimento(id):
         a=associado,
         versao=TERMO_CONSENTIMENTO_VERSAO,
         hoje=datetime.now().date(),
-        logo_uri=Path(basedir, 'static', 'img', 'logo.jpeg').as_uri(),
+        logo_uri=LOGO_PDF_URI,
     )
-    response = make_response(HTML(string=html).write_pdf())
+    response = make_response(gerar_pdf(html))
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = f'inline; filename=termo_{secure_filename(associado.matricula)}.pdf'
     return response
@@ -1833,7 +1870,7 @@ def exportar_ficha(matricula):
         fotos_base_uri=Path(UPLOAD_FOLDER).as_uri(),
     )
 
-    pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
+    pdf = gerar_pdf(html_renderizado)
 
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
@@ -2346,7 +2383,7 @@ def auditoria():
     query = Auditoria.query
 
     if filtros['usuario']:
-        query = query.filter(Auditoria.usuario_username.ilike(f"%{filtros['usuario']}%"))
+        query = query.filter(_contem_texto(Auditoria.usuario_username, filtros['usuario']))
     if filtros['acao']:
         query = query.filter(Auditoria.acao == filtros['acao'])
     if filtros['entidade']:
@@ -2414,7 +2451,7 @@ def exportar_lista_simples():
         situacao_rotulo=SITUACOES_ROTULOS.get(situacao),
     )
 
-    pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
+    pdf = gerar_pdf(html_renderizado)
 
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
