@@ -123,6 +123,10 @@
             <tr>
                 <td colspan="2"><div class="campo"><strong>Dependentes:</strong><br>{{ pessoa.dependentes or 'Nenhum informado' }}</div></td>
             </tr>
+            <tr>
+                <td><div class="campo"><strong>Situação:</strong><br>{{ pessoa.situacao_rotulo }}{% if pessoa.situacao_data %} desde {{ pessoa.situacao_data.strftime('%d/%m/%Y') }}{% endif %}</div></td>
+                <td><div class="campo"><strong>Motivo:</strong><br>{{ pessoa.situacao_motivo or '—' }}</div></td>
+            </tr>
         </table>
         
         <div class="rodape">

@@ -35,6 +35,7 @@ from database import (
     ACAO_ASSOCIADO_CRIAR,
     ACAO_ASSOCIADO_EDITAR,
     ACAO_ASSOCIADO_EXCLUIR,
+    ACAO_ASSOCIADO_EXPORTAR,
     ACAO_AUTH_LOGIN,
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
@@ -52,6 +53,8 @@ from database import (
     ROLE_ADMIN,
     ROLE_USUARIO,
     ROLES_VALIDAS,
+    SITUACAO_ATIVO,
+    SITUACOES_ROTULOS,
     Usuario,
     db,
 )
@@ -62,7 +65,8 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 basedir = os.path.abspath(os.path.dirname(__file__))
-data_dir = os.path.join(basedir, '..', 'data')
+# SGC_DATA_DIR permite apontar outra pasta de dados (ex.: pasta temporária nos testes).
+data_dir = os.environ.get('SGC_DATA_DIR') or os.path.join(basedir, '..', 'data')
 os.makedirs(data_dir, exist_ok=True)
 
 
@@ -204,6 +208,7 @@ def _gerar_nome_foto(matricula, extensao):
 db.init_app(app)
 
 from backup_service import criar_backup_zip, listar_backups_locais
+from planilha_service import gerar_csv, gerar_xlsx
 from restore_service import aplicar_restauracao, extrair_zip_seguro
 
 migrate = Migrate(app, db)
@@ -270,6 +275,45 @@ def _garantir_coluna_role():
         raise
 
 
+# Colunas acrescentadas depois da primeira versão (bancos antigos não as têm).
+# Também aplicadas pela migração Alembic equivalente, para quem usa `flask db upgrade`.
+COLUNAS_NOVAS_ASSOCIADOS = (
+    ('situacao', "VARCHAR(20) NOT NULL DEFAULT 'ativo'"),
+    ('situacao_data', 'DATE'),
+    ('situacao_motivo', 'VARCHAR(200)'),
+)
+
+
+def _garantir_colunas_associados():
+    """Mini-migração idempotente para a tabela de associados (situação cadastral).
+
+    Associados já existentes ficam como 'ativo'. Tolerante a corrida entre workers."""
+    inspector = inspect(db.engine)
+    if 'associados' not in inspector.get_table_names():
+        return
+    existentes = {c['name'] for c in inspector.get_columns('associados')}
+    for nome, ddl in COLUNAS_NOVAS_ASSOCIADOS:
+        if nome in existentes:
+            continue
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE associados ADD COLUMN {nome} {ddl}'))
+            app.logger.info("Coluna '%s' adicionada em 'associados'.", nome)
+        except Exception as exc:
+            if 'duplicate column' in str(exc).lower():
+                continue
+            raise
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_associados_situacao ON associados (situacao)'
+        ))
+
+
+def _garantir_schema():
+    _garantir_coluna_role()
+    _garantir_colunas_associados()
+
+
 with app.app_context():
     try:
         db.create_all()
@@ -279,7 +323,7 @@ with app.app_context():
             app.logger.info('Tabelas já existem (criadas por outro worker) — ignorando.')
         else:
             raise
-    _garantir_coluna_role()
+    _garantir_schema()
 
 
 def validar_cpf(cpf):
@@ -408,6 +452,7 @@ def inject_sessao():
     return {
         'sessao_is_admin': session.get('role') == ROLE_ADMIN,
         'sessao_role': session.get('role'),
+        'situacoes': SITUACOES_ROTULOS,
     }
 
 
@@ -643,8 +688,16 @@ def esqueci_senha():
 @app.route('/')
 @login_required
 def dashboard():
-    total_associados = Associado.query.count()
-    return render_template('dashboard.html', username=session.get('username'), total=total_associados)
+    contagem = dict(
+        db.session.query(Associado.situacao, db.func.count(Associado.id))
+        .group_by(Associado.situacao).all()
+    )
+    return render_template(
+        'dashboard.html',
+        username=session.get('username'),
+        total=sum(contagem.values()),
+        por_situacao={s: contagem.get(s, 0) for s in SITUACOES_ROTULOS},
+    )
 
 
 def _processar_foto_base64(foto_b64):
@@ -739,6 +792,30 @@ def _validar_dados_associado(form, associado_id=None):
         if len(dados[campo]) > limite:
             erros.append(f'{rotulo} excede {limite} caracteres.')
 
+    # Situação cadastral: só vem no formulário de edição (novos cadastros entram como ativos).
+    if 'situacao' in form:
+        situacao = form.get('situacao', '').strip()
+        if situacao not in SITUACOES_ROTULOS:
+            erros.append('Situação inválida.')
+        elif situacao == SITUACAO_ATIVO:
+            dados.update(situacao=situacao, situacao_data=None, situacao_motivo=None)
+        else:
+            motivo = form.get('situacao_motivo', '').strip()
+            if len(motivo) > 200:
+                erros.append('O motivo da situação excede 200 caracteres.')
+            valor = form.get('situacao_data', '').strip()
+            try:
+                data_situacao = datetime.strptime(valor, '%Y-%m-%d').date() if valor else hoje
+            except ValueError:
+                erros.append('Data da situação inválida.')
+                data_situacao = None
+            if data_situacao is not None:
+                if data_situacao > hoje:
+                    erros.append('A data da situação não pode ser futura.')
+                elif 'data_admissao' in dados and data_situacao < dados['data_admissao']:
+                    erros.append('A data da situação não pode ser anterior à data de admissão.')
+            dados.update(situacao=situacao, situacao_data=data_situacao, situacao_motivo=motivo or None)
+
     # Duplicidade verificada antes de gravar, com mensagem específica para cada campo.
     duplicados = Associado.query
     if associado_id is not None:
@@ -799,13 +876,32 @@ def cadastro():
     return render_template('cadastro.html', username=session.get('username'))
 
 
-def _aplicar_filtros_busca(query, nome_busca, matricula_busca, ano_busca):
-    if nome_busca:
-        query = query.filter(Associado.nome.ilike(f'%{nome_busca}%'))
-    if matricula_busca:
-        query = query.filter(Associado.matricula == matricula_busca)
-    if ano_busca:
-        query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+FILTROS_BUSCA = ('nome', 'matricula', 'ano', 'situacao')
+
+
+def _ler_filtros(fonte, sufixo=''):
+    """Lê os filtros de busca de um formulário/args (`sufixo` p/ campos ocultos de exportação)."""
+    filtros = {c: fonte.get(c + sufixo, '').strip() for c in FILTROS_BUSCA}
+    if filtros['situacao'] not in SITUACOES_ROTULOS:
+        filtros['situacao'] = ''
+    return filtros
+
+
+def _filtros_texto_vazios(filtros):
+    """True se não há filtro de nome, matrícula nem ano (a situação sozinha não reduz o bastante)."""
+    return not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
+
+
+def _aplicar_filtros_busca(query, filtros):
+    """Aplica os filtros à consulta. Levanta ValueError se o ano não for numérico."""
+    if filtros['nome']:
+        query = query.filter(Associado.nome.ilike(f"%{filtros['nome']}%"))
+    if filtros['matricula']:
+        query = query.filter(Associado.matricula == filtros['matricula'])
+    if filtros['ano']:
+        query = query.filter(extract('year', Associado.data_admissao) == int(filtros['ano']))
+    if filtros['situacao']:
+        query = query.filter(Associado.situacao == filtros['situacao'])
     return query
 
 
@@ -813,20 +909,13 @@ def _aplicar_filtros_busca(query, nome_busca, matricula_busca, ano_busca):
 @login_required
 def buscar():
     resultados = None
-    filtros = {'nome': '', 'matricula': '', 'ano': ''}
+    filtros = {c: '' for c in FILTROS_BUSCA}
 
     if request.method == 'POST':
-        filtros['nome'] = request.form.get('nome', '').strip()
-        filtros['matricula'] = request.form.get('matricula', '').strip()
-        filtros['ano'] = request.form.get('ano', '').strip()
+        filtros = _ler_filtros(request.form)
 
         try:
-            query = _aplicar_filtros_busca(
-                Associado.query.order_by(Associado.nome),
-                filtros['nome'],
-                filtros['matricula'],
-                filtros['ano'],
-            )
+            query = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros)
             resultados = query.all()
         except ValueError:
             flash('Ano de admissão inválido.', 'warning')
@@ -835,12 +924,13 @@ def buscar():
         if not resultados:
             flash('Nenhum registro encontrado com estes filtros.', 'warning')
 
-    filtros_vazios = not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
+    # Filtrar só pela situação não conta como filtro para o limite do PDF, mas o aviso
+    # só aparece se não houver filtro nenhum ou se o resultado passar do limite.
     aviso_pdf_busca_sem_filtro = (
         request.method == 'POST'
-        and filtros_vazios
-        and resultados is not None
-        and len(resultados) > 0
+        and _filtros_texto_vazios(filtros)
+        and bool(resultados)
+        and (not filtros['situacao'] or len(resultados) > _exportar_pdf_max_sem_filtro())
     )
 
     return render_template(
@@ -856,19 +946,11 @@ def buscar():
 @app.route('/exportar_pdf', methods=['POST'])
 @login_required
 def exportar_pdf():
-    nome_busca = request.form.get('nome_export', '').strip()
-    matricula_busca = request.form.get('matricula_export', '').strip()
-    ano_busca = request.form.get('ano_export', '').strip()
+    filtros = _ler_filtros(request.form, sufixo='_export')
 
     try:
-        query = _aplicar_filtros_busca(
-            Associado.query.order_by(Associado.nome),
-            nome_busca,
-            matricula_busca,
-            ano_busca,
-        )
-        filtros_vazios = not nome_busca and not matricula_busca and not ano_busca
-        if filtros_vazios:
+        query = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros)
+        if _filtros_texto_vazios(filtros):
             max_sem = _exportar_pdf_max_sem_filtro()
             total = query.count()
             if total > max_sem:
@@ -906,6 +988,52 @@ def exportar_pdf():
     return response
 
 
+FORMATOS_PLANILHA = {
+    'csv': ('text/csv; charset=utf-8', gerar_csv),
+    'xlsx': ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', gerar_xlsx),
+}
+
+
+@app.route('/exportar_planilha', methods=['POST'])
+@login_required
+def exportar_planilha():
+    """Exporta os associados filtrados (mesmos filtros da busca) em CSV ou XLSX."""
+    formato = request.form.get('formato', '').strip().lower()
+    if formato not in FORMATOS_PLANILHA:
+        flash('Formato de planilha inválido.', 'warning')
+        return redirect(request.referrer or url_for('buscar'))
+
+    filtros = _ler_filtros(request.form, sufixo='_export')
+    try:
+        associados = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros).all()
+    except ValueError:
+        flash('Ano de admissão inválido.', 'warning')
+        return redirect(url_for('buscar'))
+
+    if not associados:
+        flash('Nenhum dado para exportar.', 'warning')
+        return redirect(request.referrer or url_for('buscar'))
+
+    mimetype, gerar = FORMATOS_PLANILHA[formato]
+    conteudo = gerar(associados)
+
+    # Planilhas levam dados pessoais para fora do sistema: fica registrado quem exportou o quê.
+    filtros_usados = ', '.join(f'{k}={v}' for k, v in filtros.items() if v) or 'nenhum'
+    registrar_auditoria(
+        ACAO_ASSOCIADO_EXPORTAR,
+        entidade='associado',
+        descricao=f'{len(associados)} associado(s) em {formato.upper()}',
+        detalhes=f'filtros: {filtros_usados}',
+        commit=True,
+    )
+
+    nome_arquivo = f"associados_{datetime.now().strftime('%Y%m%d_%H%M')}.{formato}"
+    response = make_response(conteudo)
+    response.headers['Content-Type'] = mimetype
+    response.headers['Content-Disposition'] = f'attachment; filename={nome_arquivo}'
+    return response
+
+
 @app.route('/exportar_ficha/<matricula>')
 @login_required
 def exportar_ficha(matricula):
@@ -934,6 +1062,7 @@ def exportar_ficha(matricula):
 CAMPOS_ASSOCIADO_AUDITAVEIS = [
     'nome', 'matricula', 'rg', 'cpf', 'telefone', 'telefone_whatsapp',
     'endereco', 'data_nascimento', 'email', 'data_admissao', 'dependentes',
+    'situacao', 'situacao_data', 'situacao_motivo',
 ]
 
 
@@ -1146,14 +1275,20 @@ def listar_todos():
     except ValueError:
         page = 1
 
-    paginacao = Associado.query.order_by(Associado.nome).paginate(
-        page=page, per_page=PAGINA_TAMANHO, error_out=False
-    )
+    situacao = request.args.get('situacao', '').strip()
+    if situacao not in SITUACOES_ROTULOS:
+        situacao = ''
+
+    query = Associado.query.order_by(Associado.nome)
+    if situacao:
+        query = query.filter(Associado.situacao == situacao)
+    paginacao = query.paginate(page=page, per_page=PAGINA_TAMANHO, error_out=False)
     return render_template(
         'listar.html',
         username=session.get('username'),
         associados=paginacao.items,
         paginacao=paginacao,
+        situacao=situacao,
     )
 
 
@@ -1324,20 +1459,32 @@ def auditoria():
 @app.route('/exportar_lista_simples', methods=['POST'])
 @login_required
 def exportar_lista_simples():
+    situacao = request.form.get('situacao', '').strip()
+    if situacao not in SITUACOES_ROTULOS:
+        situacao = ''
+    query = Associado.query.order_by(Associado.nome)
+    if situacao:
+        query = query.filter(Associado.situacao == situacao)
+
     max_linhas = _exportar_lista_simples_max()
-    total = Associado.query.count()
+    total = query.count()
     if total > max_linhas:
         flash(
             f'A lista teria {total} associados, acima do limite configurado de {max_linhas}. '
             f'Use a busca com filtros ou aumente EXPORTAR_LISTA_SIMPLES_MAX no ambiente — com cuidado.',
             'warning',
         )
-        return redirect(url_for('listar_todos'))
+        return redirect(url_for('listar_todos', situacao=situacao or None))
 
-    associados = Associado.query.order_by(Associado.nome).all()
+    associados = query.all()
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
-    html_renderizado = render_template('pdf_lista_simples.html', associados=associados, now=data_geracao)
+    html_renderizado = render_template(
+        'pdf_lista_simples.html',
+        associados=associados,
+        now=data_geracao,
+        situacao_rotulo=SITUACOES_ROTULOS.get(situacao),
+    )
 
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
@@ -1507,6 +1654,9 @@ def admin_restore():
             db.session.remove()
             if db.engine is not None:
                 db.engine.dispose()
+
+            # Um backup antigo pode não ter as colunas acrescentadas depois.
+            _garantir_schema()
 
             registrar_auditoria(
                 ACAO_SISTEMA_RESTORE,

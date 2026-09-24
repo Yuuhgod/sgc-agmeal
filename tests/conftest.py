@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pytest
 
 os.environ.setdefault('WTF_CSRF_ENABLED', '0')
+# Os testes usam um banco próprio numa pasta temporária, nunca o data/sgc.db real.
+os.environ['SGC_DATA_DIR'] = tempfile.mkdtemp(prefix='sgc_pytest_')
 
 
 @pytest.fixture(scope='session')

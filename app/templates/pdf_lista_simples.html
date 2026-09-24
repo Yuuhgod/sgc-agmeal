@@ -57,7 +57,7 @@
                 </td>
                 <td style="border: none; text-align: left; vertical-align: middle; padding: 0;">
                     <h1 style="color: #0A2342; margin: 0; font-size: 20px;">SGC - AGMEAL</h1>
-                    <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">Lista Geral de Associados</h3>
+                    <h3 style="color: #D4AF37; margin: 2px 0 0 0; font-size: 14px;">{% if situacao_rotulo %}Lista de Associados — {{ situacao_rotulo }}{% else %}Lista Geral de Associados{% endif %}</h3>
                 </td>
             </tr>
         </table>
@@ -67,8 +67,9 @@
         <thead>
             <tr>
                 <th style="width: 10%;">#</th>
-                <th style="width: 65%;">Nome Completo</th>
-                <th style="width: 25%;">Matrícula</th>
+                <th style="width: 55%;">Nome Completo</th>
+                <th style="width: 20%;">Matrícula</th>
+                <th style="width: 15%;">Situação</th>
             </tr>
         </thead>
         <tbody>
@@ -77,6 +78,7 @@
                 <td>{{ loop.index }}</td>
                 <td>{{ pessoa.nome }}</td>
                 <td>{{ pessoa.matricula }}</td>
+                <td>{{ pessoa.situacao_rotulo }}</td>
             </tr>
             {% endfor %}
         </tbody>

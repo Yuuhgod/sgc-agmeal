@@ -61,6 +61,16 @@ class Usuario(db.Model):
                 self.set_palavra_recuperacao(palavra_plain)
 
 
+SITUACAO_ATIVO = 'ativo'
+SITUACAO_INATIVO = 'inativo'
+SITUACAO_DESLIGADO = 'desligado'
+SITUACOES_ROTULOS = {
+    SITUACAO_ATIVO: 'Ativo',
+    SITUACAO_INATIVO: 'Inativo',
+    SITUACAO_DESLIGADO: 'Desligado',
+}
+
+
 class Associado(db.Model):
     __tablename__ = 'associados'
 
@@ -79,6 +89,18 @@ class Associado(db.Model):
     dependentes = db.Column(db.Text, nullable=True)
     data_criacao = db.Column(db.DateTime, default=_agora_utc)
 
+    # Situação cadastral: desligar/inativar preserva o histórico (em vez de excluir).
+    situacao = db.Column(
+        db.String(20), nullable=False, default=SITUACAO_ATIVO,
+        server_default=SITUACAO_ATIVO, index=True,
+    )
+    situacao_data = db.Column(db.Date, nullable=True)
+    situacao_motivo = db.Column(db.String(200), nullable=True)
+
+    @property
+    def situacao_rotulo(self):
+        return SITUACOES_ROTULOS.get(self.situacao, self.situacao)
+
 
 # Tipos de ações registradas na trilha de auditoria.
 ACAO_ASSOCIADO_CRIAR = 'associado.criar'
@@ -93,6 +115,7 @@ ACAO_AUTH_LOGOUT = 'auth.logout'
 ACAO_AUTH_LOGIN_FALHOU = 'auth.login_falhou'
 ACAO_AUTH_RECUPERACAO = 'auth.senha_recuperada'
 ACAO_AUTH_RECUPERACAO_FALHOU = 'auth.recuperacao_falhou'
+ACAO_ASSOCIADO_EXPORTAR = 'associado.exportar'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
 ACAO_SISTEMA_RESTORE = 'sistema.restore'
 
@@ -109,6 +132,7 @@ ACOES_ROTULOS = {
     ACAO_AUTH_LOGIN_FALHOU: 'Tentativa de login (falhou)',
     ACAO_AUTH_RECUPERACAO: 'Redefiniu a senha pela frase de segurança',
     ACAO_AUTH_RECUPERACAO_FALHOU: 'Tentativa de recuperação de senha (falhou)',
+    ACAO_ASSOCIADO_EXPORTAR: 'Exportou planilha de associados',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
     ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
 }

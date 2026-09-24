@@ -1,0 +1,26 @@
+{# Selo colorido com a situação cadastral do associado. #}
+{% macro selo_situacao(pessoa) -%}
+{%- set cores = {'ativo': 'success', 'inativo': 'secondary', 'desligado': 'danger'} -%}
+<span class="badge text-bg-{{ cores.get(pessoa.situacao, 'light') }}"
+      {% if pessoa.situacao_data %}title="Desde {{ pessoa.situacao_data.strftime('%d/%m/%Y') }}{% if pessoa.situacao_motivo %} — {{ pessoa.situacao_motivo }}{% endif %}"{% endif %}>
+    {{ pessoa.situacao_rotulo }}
+</span>
+{%- endmacro %}
+
+{# Botões para baixar planilha (CSV/XLSX) com os filtros informados. #}
+{% macro botoes_planilha(filtros) -%}
+<form action="{{ url_for('exportar_planilha') }}" method="POST" class="d-inline m-0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    {% for campo, valor in filtros.items() %}
+    <input type="hidden" name="{{ campo }}_export" value="{{ valor }}">
+    {% endfor %}
+    <div class="btn-group btn-group-sm" role="group" aria-label="Exportar planilha">
+        <button type="submit" name="formato" value="xlsx" class="btn btn-success" title="Planilha do Excel com os mesmos registros">
+            <i class="fa-solid fa-file-excel me-1"></i>Excel
+        </button>
+        <button type="submit" name="formato" value="csv" class="btn btn-outline-success" title="CSV separado por ponto e vírgula (abre no Excel)">
+            <i class="fa-solid fa-file-csv me-1"></i>CSV
+        </button>
+    </div>
+</form>
+{%- endmacro %}
