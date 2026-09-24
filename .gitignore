@@ -36,3 +36,6 @@ sgc.log
 # Sistema Operacional
 .DS_Store
 Thumbs.db
+# Arquivos de execução (lock do agendador de backup e uploads pendentes de importação/restauração)
+data/.backup_agendador.lock
+data/restore_pending/
