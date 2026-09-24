@@ -1,0 +1,13 @@
+# Abre PRs semanais quando houver versão nova (inclusive correções de segurança)
+# das dependências Python e das actions usadas no CI.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

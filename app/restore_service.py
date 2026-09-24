@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import sqlite3
-import zipfile
 
 from backup_service import abrir_zip, zip_criptografado
 

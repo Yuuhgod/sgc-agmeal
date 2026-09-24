@@ -84,6 +84,12 @@ from database import (
     normalizar_busca,
 )
 
+import backup_agendador
+from backup_service import criar_backup_zip, listar_backups_locais
+from importacao_service import PlanilhaInvalida, gerar_modelo_xlsx, ler_planilha, separar_dependentes
+from planilha_service import gerar_csv, gerar_xlsx
+from restore_service import SenhaBackupNecessaria, aplicar_restauracao, extrair_zip_seguro
+
 app = Flask(__name__)
 
 # Corrige scheme/host/ip quando atrás do Nginx (X-Forwarded-*).
@@ -260,12 +266,6 @@ class _BuscadorRecursosPDF(URLFetcher):
 
 def gerar_pdf(html):
     return HTML(string=html, base_url=Path(STATIC_DIR).as_uri() + '/', url_fetcher=_BuscadorRecursosPDF()).write_pdf()
-
-import backup_agendador
-from backup_service import criar_backup_zip, listar_backups_locais
-from importacao_service import PlanilhaInvalida, gerar_modelo_xlsx, ler_planilha, separar_dependentes
-from planilha_service import gerar_csv, gerar_xlsx
-from restore_service import SenhaBackupNecessaria, aplicar_restauracao, extrair_zip_seguro
 
 migrate = Migrate(app, db)
 
@@ -1031,7 +1031,7 @@ def _dependentes_do_form(form):
     Linhas totalmente em branco são ignoradas."""
     colunas = [form.getlist(f'dep_{c}') for c in ('nome', 'parentesco', 'nascimento', 'cpf')]
     linhas = []
-    for nome, parentesco, nascimento, cpf in zip(*colunas):
+    for nome, parentesco, nascimento, cpf in zip(*colunas, strict=False):
         linha = {
             'nome': nome.strip(), 'parentesco': parentesco.strip(),
             'nascimento': nascimento.strip(), 'cpf': cpf.strip(),

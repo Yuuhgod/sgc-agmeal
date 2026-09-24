@@ -1,5 +1,6 @@
 """Teste completo do app SGC-AGMEAL."""
-import sys, os, re
+import os
+import sys
 from io import BytesIO
 
 _THIS = os.path.abspath(os.path.dirname(__file__))
@@ -53,7 +54,7 @@ with app.test_client() as c:
     with app.app_context():
         users_count = Usuario.query.count()
         assoc_count = Associado.query.count()
-    print(f"\n=== SGC-AGMEAL - Teste Completo ===")
+    print("\n=== SGC-AGMEAL - Teste Completo ===")
     print(f"DB: {users_count} usuário(s), {assoc_count} associado(s)\n")
 
     # 1. Setup (com usuário → deve redirecionar)
@@ -195,7 +196,7 @@ print("\n" + "="*50)
 ok_count = sum(1 for ok, _ in results if ok)
 total = len(results)
 
-for ok, msg in results:
+for _ok, msg in results:
     print(msg)
 
 print(f"\n{'='*50}")

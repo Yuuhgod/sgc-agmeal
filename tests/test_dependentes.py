@@ -118,7 +118,7 @@ def test_planilha_xlsx_tem_aba_de_dependentes(admin_client):
     principal = {c.value: i for i, c in enumerate(wb['Associados'][1])}
     assert wb['Associados'][2][principal['Dependentes']].value == 'Dep A (Filho(a)); Dep B (Cônjuge)'
     linhas = [[c.value for c in row] for row in wb['Dependentes'].iter_rows(min_row=2)]
-    assert [(l[1], l[2], l[3]) for l in linhas] == [(nome, 'Dep A', 'Filho(a)'), (nome, 'Dep B', 'Cônjuge')]
+    assert [(lin[1], lin[2], lin[3]) for lin in linhas] == [(nome, 'Dep A', 'Filho(a)'), (nome, 'Dep B', 'Cônjuge')]
 
 
 def test_conversao_do_texto_antigo_roda_uma_vez(admin_client, flask_app):

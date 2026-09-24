@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 from database import ROLE_ADMIN, ROLE_USUARIO, Auditoria, Usuario, db
-from tests.test_correcoes_seguranca import _ip_aleatorio, _login, usuario_comum  # noqa: F401 (fixture)
+from tests.test_correcoes_seguranca import _ip_aleatorio, _login
 
 
 # Obs.: as fixtures `admin_client` e `client` são o MESMO cliente HTTP; quando o teste precisa

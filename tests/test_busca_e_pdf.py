@@ -91,7 +91,7 @@ def test_pdfs_nao_buscam_recursos_por_http(admin_client, joao, monkeypatch):
 def test_buscador_recusa_http_e_arquivos_fora_das_pastas(url):
     import main
 
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         main._BuscadorRecursosPDF().fetch(url)
 
 

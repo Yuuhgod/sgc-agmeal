@@ -9,10 +9,10 @@ from datetime import date
 
 from openpyxl import Workbook, load_workbook
 
-from database import ACAO_ASSOCIADO_IMPORTAR, Associado, Auditoria, db
+from database import ACAO_ASSOCIADO_IMPORTAR, Associado, Auditoria
 from importacao_service import separar_dependentes
 from tests.cpf_utils import cpf_digitos_validos
-from tests.test_correcoes_seguranca import _login, usuario_comum  # noqa: F401 (fixture)
+from tests.test_correcoes_seguranca import _login
 
 CABECALHO = ['Matrícula', 'Nome', 'CPF', 'RG', 'Data de nascimento', 'Data de admissão', 'E-mail', 'Endereço',
              'Situação', 'Dependentes']
@@ -35,8 +35,8 @@ def _csv(linhas, sep=';', cabecalho=CABECALHO, codificacao='utf-8-sig'):
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=sep, lineterminator='\r\n')
     w.writerow(cabecalho)
-    for l in linhas:
-        w.writerow([l.get(c, '') for c in cabecalho])
+    for linha in linhas:
+        w.writerow([linha.get(c, '') for c in cabecalho])
     return buf.getvalue().encode(codificacao)
 
 

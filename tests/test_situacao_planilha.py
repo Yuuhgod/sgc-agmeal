@@ -114,7 +114,7 @@ def test_listar_filtra_por_situacao(admin_client, flask_app):
     with flask_app.app_context():
         total_desligados = Associado.query.filter_by(situacao='desligado').count()
 
-    r = admin_client.get(f'/listar?situacao=desligado&page=1')
+    r = admin_client.get('/listar?situacao=desligado&page=1')
     assert r.status_code == 200
     if total_desligados <= 25:
         assert nome_deslig.encode() in r.data
@@ -171,7 +171,7 @@ def test_exportar_xlsx_com_filtros(admin_client, flask_app):
     cabecalho = [c.value for c in ws[1]]
     assert cabecalho[:3] == ['Matrícula', 'Nome', 'CPF']
     assert ws.max_row == 2
-    linha = dict(zip(cabecalho, [c.value for c in ws[2]]))
+    linha = dict(zip(cabecalho, [c.value for c in ws[2]], strict=True))
     assert linha['Nome'] == nome
     assert linha['Situação'] == 'Inativo'
     assert linha['Data da situação'].date() == date(2024, 2, 3)
