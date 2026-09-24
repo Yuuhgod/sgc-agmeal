@@ -51,6 +51,12 @@ Para **uso num único PC** (sem Docker), siga a **Opção 1** (Windows) ou a **O
    - Configura **auto-start no boot** (script `.vbs` invisível em `shell:startup`)
 4. Para usar: duplo clique em **SGC-AGMEAL** na Área de Trabalho
 
+**Para atualizar** uma instalação existente, copie a versão nova da pasta e rode o
+`INSTALAR.bat` de novo. O banco (`data/`), os backups locais e as fotos são
+preservados: antes de trocar o código, o instalador para o servidor e guarda uma
+cópia de segurança em `~/sgc-agmeal-preservado-<data>/` no Ubuntu (as 3 mais
+recentes são mantidas). Mesmo assim, gere um backup pelo menu **Backup** antes.
+
 O servidor passa a iniciar **sozinho** toda vez que o PC ligar — o atalho só
 abre o navegador na URL configurada.
 
