@@ -166,6 +166,7 @@ ACAO_AUTH_LOGIN_FALHOU = 'auth.login_falhou'
 ACAO_AUTH_RECUPERACAO = 'auth.senha_recuperada'
 ACAO_AUTH_RECUPERACAO_FALHOU = 'auth.recuperacao_falhou'
 ACAO_ASSOCIADO_EXPORTAR = 'associado.exportar'
+ACAO_ASSOCIADO_IMPORTAR = 'associado.importar'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
 ACAO_SISTEMA_RESTORE = 'sistema.restore'
 
@@ -186,6 +187,7 @@ ACOES_ROTULOS = {
     ACAO_AUTH_RECUPERACAO: 'Redefiniu a senha pela frase de segurança',
     ACAO_AUTH_RECUPERACAO_FALHOU: 'Tentativa de recuperação de senha (falhou)',
     ACAO_ASSOCIADO_EXPORTAR: 'Exportou planilha de associados',
+    ACAO_ASSOCIADO_IMPORTAR: 'Importou associados de planilha',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
     ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
 }
