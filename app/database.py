@@ -104,6 +104,12 @@ class Associado(db.Model):
     situacao_data = db.Column(db.Date, nullable=True)
     situacao_motivo = db.Column(db.String(200), nullable=True)
 
+    # LGPD: consentimento para o tratamento dos dados (versão do termo aceito) e anonimização.
+    consentimento_data = db.Column(db.DateTime, nullable=True)
+    consentimento_versao = db.Column(db.String(20), nullable=True)
+    consentimento_por = db.Column(db.String(80), nullable=True)
+    anonimizado_em = db.Column(db.DateTime, nullable=True)
+
     dependentes = db.relationship(
         'Dependente',
         backref='titular',
@@ -168,6 +174,9 @@ ACAO_AUTH_RECUPERACAO_FALHOU = 'auth.recuperacao_falhou'
 ACAO_ASSOCIADO_EXPORTAR = 'associado.exportar'
 ACAO_ASSOCIADO_IMPORTAR = 'associado.importar'
 ACAO_ASSOCIADO_CARTEIRINHA = 'associado.carteirinha'
+ACAO_ASSOCIADO_CONSENTIMENTO = 'associado.consentimento'
+ACAO_ASSOCIADO_DADOS_TITULAR = 'associado.dados_titular'
+ACAO_ASSOCIADO_ANONIMIZAR = 'associado.anonimizar'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
 ACAO_SISTEMA_RESTORE = 'sistema.restore'
 
@@ -190,6 +199,9 @@ ACOES_ROTULOS = {
     ACAO_ASSOCIADO_EXPORTAR: 'Exportou planilha de associados',
     ACAO_ASSOCIADO_IMPORTAR: 'Importou associados de planilha',
     ACAO_ASSOCIADO_CARTEIRINHA: 'Emitiu carteirinha',
+    ACAO_ASSOCIADO_CONSENTIMENTO: 'Registrou/revogou consentimento (LGPD)',
+    ACAO_ASSOCIADO_DADOS_TITULAR: 'Exportou dados do titular (LGPD)',
+    ACAO_ASSOCIADO_ANONIMIZAR: 'Anonimizou associado (LGPD)',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
     ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
 }
