@@ -64,12 +64,12 @@ def test_restauracao_remove_wal_antigo(tmp_path):
 
 
 def test_sem_gunicorn_nao_envia_sinal(flask_app, monkeypatch):
-    import main
+    import rotas_backup
 
     enviados = []
-    monkeypatch.setattr(main.os, 'kill', lambda *a: enviados.append(a))
+    monkeypatch.setattr(rotas_backup.os, 'kill', lambda *a: enviados.append(a))
     with flask_app.test_request_context(environ_base={'SERVER_SOFTWARE': 'Werkzeug/3'}):
-        assert main._recarregar_workers_gunicorn() is False
+        assert rotas_backup._recarregar_workers_gunicorn() is False
     with flask_app.test_request_context(environ_base={'SERVER_SOFTWARE': 'gunicorn/23.0.0'}):
-        assert main._recarregar_workers_gunicorn() is True
-    assert len(enviados) == 1 and enviados[0][1] == main.signal.SIGHUP
+        assert rotas_backup._recarregar_workers_gunicorn() is True
+    assert len(enviados) == 1 and enviados[0][1] == rotas_backup.signal.SIGHUP

@@ -25,13 +25,13 @@ def associado(admin_client, flask_app):
 
 
 def _url(flask_app, aid, emissao=None):
-    import main
+    import rotas_carteirinha
 
     emissao = emissao or date.today()
     with flask_app.test_request_context():
         with flask_app.app_context():
             a = db.session.get(Associado, aid)
-            assinatura = main._assinatura_carteirinha(a.id, a.matricula, emissao)
+            assinatura = rotas_carteirinha._assinatura_carteirinha(a.id, a.matricula, emissao)
     return f'/verificar/{aid}/{emissao:%Y%m%d}/{assinatura}'
 
 
@@ -44,18 +44,18 @@ def test_emite_pdf_e_audita(admin_client, flask_app, associado):
 
 
 def test_qr_aponta_para_url_publica_configurada(admin_client, flask_app, associado, monkeypatch):
-    import main
+    import rotas_carteirinha
 
     monkeypatch.setenv('SGC_URL_PUBLICA', 'http://192.168.0.10/')
     capturado = {}
-    original = main.render_template
+    original = rotas_carteirinha.render_template
 
     def espiar(nome, **ctx):
         if nome == 'pdf_carteirinha.html':
             capturado.update(ctx)
         return original(nome, **ctx)
 
-    monkeypatch.setattr(main, 'render_template', espiar)
+    monkeypatch.setattr(rotas_carteirinha, 'render_template', espiar)
     admin_client.get(f"/carteirinha/{associado['id']}")
     assert re.fullmatch(rf"http://192\.168\.0\.10/verificar/{associado['id']}/\d{{8}}/[\w-]+", capturado['url_verificacao'])
     assert capturado['validade'] > date.today()
@@ -102,20 +102,20 @@ def test_associado_desligado_aparece_como_nao_ativo(admin_client, flask_app, ass
 
 
 def test_carteirinha_vencida(flask_app, associado):
-    import main
+    import rotas_carteirinha
 
-    emissao = date.today() - timedelta(days=31 * (main.CARTEIRINHA_VALIDADE_MESES + 1))
+    emissao = date.today() - timedelta(days=31 * (rotas_carteirinha.CARTEIRINHA_VALIDADE_MESES + 1))
     html = flask_app.test_client().get(_url(flask_app, associado['id'], emissao)).get_data(as_text=True)
     assert 'Carteirinha vencida' in html
 
 
 def test_somar_meses():
-    import main
+    import rotas_carteirinha
 
-    assert main._somar_meses(date(2024, 1, 31), 1) == date(2024, 2, 29)
-    assert main._somar_meses(date(2023, 1, 31), 1) == date(2023, 2, 28)
-    assert main._somar_meses(date(2024, 11, 15), 12) == date(2025, 11, 15)
-    assert main._somar_meses(date(2024, 12, 1), 1) == date(2025, 1, 1)
+    assert rotas_carteirinha._somar_meses(date(2024, 1, 31), 1) == date(2024, 2, 29)
+    assert rotas_carteirinha._somar_meses(date(2023, 1, 31), 1) == date(2023, 2, 28)
+    assert rotas_carteirinha._somar_meses(date(2024, 11, 15), 12) == date(2025, 11, 15)
+    assert rotas_carteirinha._somar_meses(date(2024, 12, 1), 1) == date(2025, 1, 1)
 
 
 def test_emitir_exige_login(flask_app, associado):

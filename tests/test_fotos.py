@@ -30,45 +30,45 @@ def _foto_de_celular(largura=2000, altura=1500, orientacao=1, formato='JPEG'):
 
 
 def test_normalizar_reduz_e_remove_exif():
-    import main
+    import rotas_associados
 
     bruto = _foto_de_celular()
     assert GPS in Image.open(io.BytesIO(bruto)).getexif()
-    img = Image.open(io.BytesIO(main._normalizar_foto(bruto)))
+    img = Image.open(io.BytesIO(rotas_associados._normalizar_foto(bruto)))
     assert img.format == 'JPEG'
     assert img.width <= 600 and img.height <= 800
     assert not img.getexif()
 
 
 def test_normalizar_aplica_orientacao_do_exif():
-    import main
+    import rotas_associados
 
     # Paisagem com orientação 6 ("girar 90°"): deve virar retrato.
-    img = Image.open(io.BytesIO(main._normalizar_foto(_foto_de_celular(800, 600, orientacao=6))))
+    img = Image.open(io.BytesIO(rotas_associados._normalizar_foto(_foto_de_celular(800, 600, orientacao=6))))
     assert img.height > img.width
 
 
 def test_png_vira_jpeg():
-    import main
+    import rotas_associados
 
     buf = io.BytesIO()
     Image.new('RGBA', (300, 400), (10, 20, 30, 128)).save(buf, format='PNG')
-    assert Image.open(io.BytesIO(main._normalizar_foto(buf.getvalue()))).format == 'JPEG'
+    assert Image.open(io.BytesIO(rotas_associados._normalizar_foto(buf.getvalue()))).format == 'JPEG'
 
 
 def test_imagem_corrompida_e_recusada():
-    import main
+    import rotas_associados
 
     with pytest.raises(ValueError):
-        main._normalizar_foto(b'\xff\xd8\xff' + b'lixo' * 100)
+        rotas_associados._normalizar_foto(b'\xff\xd8\xff' + b'lixo' * 100)
 
 
 def _foto_do(flask_app, matricula):
-    import main
+    import nucleo
 
     with flask_app.app_context():
         nome = Associado.query.filter_by(matricula=matricula).first().foto_perfil
-    return nome, os.path.join(main.UPLOAD_FOLDER, nome)
+    return nome, os.path.join(nucleo.UPLOAD_FOLDER, nome)
 
 
 def test_cadastro_com_recorte_base64(admin_client, flask_app):

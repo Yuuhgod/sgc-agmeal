@@ -110,7 +110,7 @@ def test_importar_xlsx_com_tipos_do_excel(admin_client, flask_app):
     ws.append(CABECALHO)
     cpf = '0' + cpf_digitos_validos()[1:]
     while True:  # CPF válido começando com 0 (o Excel o guardaria como número sem o zero)
-        from main import validar_cpf
+        from nucleo import validar_cpf
         if validar_cpf(cpf):
             break
         cpf = '0' + cpf_digitos_validos()[1:]
@@ -161,12 +161,12 @@ def test_exportar_e_reimportar_planilha_do_sistema(admin_client, flask_app):
 
 
 def test_cancelar_remove_arquivo(admin_client, flask_app):
-    import main
+    import rotas_importacao
 
     _enviar(admin_client, _csv([_linha()]))
     with admin_client.session_transaction() as sess:
         token = sess['importacao']['token']
-    caminho = main._arquivo_importacao(token, 'csv')
+    caminho = rotas_importacao._arquivo_importacao(token, 'csv')
     import os
     assert os.path.isfile(caminho)
     admin_client.post('/associados/importar/cancelar')

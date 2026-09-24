@@ -76,9 +76,9 @@ def test_exportar_pdf_sem_resultados_redireciona(admin_client):
 
 
 def test_exportar_pdf_sem_filtro_bloqueado_acima_do_limite(monkeypatch, admin_client, flask_app):
-    import main
+    import rotas_associados
 
-    monkeypatch.setattr(main, '_exportar_pdf_max_sem_filtro', lambda: 1)
+    monkeypatch.setattr(rotas_associados, '_exportar_pdf_max_sem_filtro', lambda: 1)
     with flask_app.app_context():
         from database import Associado
 

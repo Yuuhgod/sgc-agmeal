@@ -245,10 +245,22 @@ consistente do SQLite com o servidor em execução.
 ## Estrutura
 ```
 app/
-  main.py            Rotas e configuração do app
-  database.py        Modelos SQLAlchemy
-  restore_service.py Validação e aplicação de ZIP de restauração
-  migrations/        Alembic (Flask-Migrate)
+  main.py               Ponto de entrada (gunicorn main:app): importa os módulos de rotas
+  nucleo.py             App Flask, configuração, hooks, auditoria, PDFs e utilitários comuns
+  rotas_auth.py         Setup, login/logout, recuperação e troca de senha, perfil
+  rotas_associados.py   Painel, cadastro, busca, edição, listas e exportações
+  rotas_importacao.py   Importação em lote (XLSX/CSV)
+  rotas_carteirinha.py  Carteirinha em PDF e verificação pelo QR code
+  rotas_lgpd.py         Consentimento, dados do titular e anonimização
+  rotas_usuarios.py     Gestão de usuários e auditoria
+  rotas_backup.py       Backup e restauração pela interface
+  database.py           Modelos SQLAlchemy
+  backup_service.py     Geração e verificação dos ZIPs de backup (com criptografia)
+  backup_agendador.py   Backup automático em segundo plano
+  restore_service.py    Validação e aplicação de ZIP de restauração
+  importacao_service.py Leitura das planilhas de importação
+  planilha_service.py   Geração das planilhas de exportação
+  migrations/           Alembic (Flask-Migrate)
   templates/         Jinja2
   static/            CSS, JS e imagens (inclui uploads/fotos)
 data/                Banco SQLite, backups ZIP, restore_pending/ e segredo de sessão

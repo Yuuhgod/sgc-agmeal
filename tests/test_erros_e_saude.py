@@ -63,12 +63,12 @@ def test_saude_ok_sem_login(client):
 
 
 def test_saude_503_se_o_banco_falhar(client, monkeypatch):
-    import main
+    import nucleo
 
     def falha(*a, **k):
         raise OperationalError('SELECT 1', {}, Exception('disco'))
 
-    monkeypatch.setattr(main.db.session, 'execute', falha)
+    monkeypatch.setattr(nucleo.db.session, 'execute', falha)
     r = client.get('/saude')
     assert r.status_code == 503 and r.get_json() == {'status': 'erro'}
 

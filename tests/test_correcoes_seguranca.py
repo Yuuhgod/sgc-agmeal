@@ -68,7 +68,7 @@ def test_admin_rebaixado_perde_acesso_admin(client, flask_app, usuario_comum):
 # --- Recuperação de senha ---------------------------------------------------------------
 
 def test_recuperacao_bloqueia_apos_falhas(client, flask_app, usuario_comum):
-    import main
+    import nucleo
 
     ip = _ip_aleatorio()
     dados_errados = {
@@ -76,12 +76,12 @@ def test_recuperacao_bloqueia_apos_falhas(client, flask_app, usuario_comum):
         'palavra_recuperacao': 'frase errada',
         'nova_senha': 'nova_senha_123',
     }
-    for _ in range(main.LOGIN_MAX_FALHAS_IP):
+    for _ in range(nucleo.LOGIN_MAX_FALHAS_IP):
         client.post('/esqueci_senha', data=dados_errados, environ_base={'REMOTE_ADDR': ip})
 
     with flask_app.app_context():
         falhas = Auditoria.query.filter_by(acao=ACAO_AUTH_RECUPERACAO_FALHOU, ip_origem=ip).count()
-        assert falhas == main.LOGIN_MAX_FALHAS_IP
+        assert falhas == nucleo.LOGIN_MAX_FALHAS_IP
 
     # Mesmo com a frase correta, o IP está bloqueado.
     r = client.post(

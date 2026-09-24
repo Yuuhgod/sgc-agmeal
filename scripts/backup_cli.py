@@ -27,7 +27,7 @@ os.environ.setdefault('WTF_CSRF_ENABLED', '0')
 
 from database import ACAO_SISTEMA_BACKUP, Auditoria, db  # noqa: E402
 
-import main as main_mod  # noqa: E402
+import nucleo  # noqa: E402
 
 from backup_service import criar_backup_zip  # noqa: E402
 
@@ -52,18 +52,18 @@ def _backup_sync_dir():
 
 
 def cli_main() -> int:
-    application = main_mod.app
+    application = nucleo.app
     with application.app_context():
         sync = _backup_sync_dir()
         info = criar_backup_zip(
-            data_dir=main_mod.data_dir,
-            upload_folder=main_mod.UPLOAD_FOLDER,
-            backups_dir=main_mod.backups_dir,
+            data_dir=nucleo.data_dir,
+            upload_folder=nucleo.UPLOAD_FOLDER,
+            backups_dir=nucleo.backups_dir,
             sync_dir=sync,
             keep_local=_backup_keep_local(),
             keep_sync=_backup_keep_sync(),
             log=application.logger,
-            senha=main_mod._senha_backup(),
+            senha=nucleo._senha_backup(),
         )
         application.logger.info(
             'Backup agendado concluído: %s (%s bytes) sync=%s',

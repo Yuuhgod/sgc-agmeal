@@ -19,10 +19,10 @@ SENHA = 'Senha Forte 123!'
 @pytest.fixture
 def senha_isolada(tmp_path, monkeypatch):
     """A senha dos backups fica num arquivo temporário (não afeta os outros testes)."""
-    import main
+    import nucleo
 
     arquivo = tmp_path / '.backup_senha'
-    monkeypatch.setattr(main, '_arquivo_senha_backup', lambda: str(arquivo))
+    monkeypatch.setattr(nucleo, '_arquivo_senha_backup', lambda: str(arquivo))
     monkeypatch.delenv('BACKUP_SENHA', raising=False)
     return arquivo
 
@@ -101,12 +101,12 @@ def _enviar_restore(client, conteudo, senha=''):
 
 
 def test_restaurar_zip_protegido_sem_senha_correta_nao_altera_nada(admin_client, senha_isolada, pastas, flask_app, monkeypatch):
-    import main
+    import rotas_backup
 
     info = _criar(pastas, flask_app.logger, SENHA)
     conteudo = open(info['zip_path'], 'rb').read()
     chamou = []
-    monkeypatch.setattr(main, 'aplicar_restauracao', lambda **kw: chamou.append(kw))
+    monkeypatch.setattr(rotas_backup, 'aplicar_restauracao', lambda **kw: chamou.append(kw))
 
     # Sem senha salva e sem senha digitada.
     r = _enviar_restore(admin_client, conteudo)
@@ -119,16 +119,16 @@ def test_restaurar_zip_protegido_sem_senha_correta_nao_altera_nada(admin_client,
 @pytest.mark.parametrize('digitada, salva', [(SENHA, None), ('', SENHA), ('errada', SENHA)])
 def test_restaurar_zip_protegido_com_senha(admin_client, senha_isolada, pastas, flask_app, monkeypatch, digitada, salva):
     """Aceita a senha digitada ou, se ela não servir, a salva no servidor."""
-    import main
+    import rotas_backup
 
     info = _criar(pastas, flask_app.logger, SENHA)
     conteudo = open(info['zip_path'], 'rb').read()
     if salva:
         senha_isolada.write_text(salva)
     extraidos = []
-    monkeypatch.setattr(main, 'aplicar_restauracao', lambda **kw: extraidos.append(
+    monkeypatch.setattr(rotas_backup, 'aplicar_restauracao', lambda **kw: extraidos.append(
         os.path.isfile(os.path.join(kw['extract_root'], 'data', 'sgc.db'))))
-    monkeypatch.setattr(main, 'criar_backup_zip', lambda **kw: {'zip_filename': 'x', 'size_bytes': 0, 'sync_path': None})
+    monkeypatch.setattr(rotas_backup, 'criar_backup_zip', lambda **kw: {'zip_filename': 'x', 'size_bytes': 0, 'sync_path': None})
     r = _enviar_restore(admin_client, conteudo, digitada)
     assert extraidos == [True], r.get_data(as_text=True)[:500]
 

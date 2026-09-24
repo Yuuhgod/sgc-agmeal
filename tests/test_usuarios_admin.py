@@ -110,7 +110,7 @@ def test_outro_admin_pode_rebaixar_admin_se_houver_outro_ativo(outro_admin_clien
 
 
 def test_unico_admin_ativo_nao_pode_ser_rebaixado(flask_app, admin_credentials):
-    import main
+    import rotas_usuarios
 
     with flask_app.app_context():
         admins = Usuario.query.filter_by(role=ROLE_ADMIN, ativo=True).all()
@@ -122,8 +122,8 @@ def test_unico_admin_ativo_nao_pode_ser_rebaixado(flask_app, admin_credentials):
         db.session.commit()
         try:
             principal = Usuario.query.filter_by(username='admin').first()
-            assert main._usuario_admin_ativo_unico(principal) is (len(admins) == 1)
-            assert main._usuario_admin_ativo_unico(inativo) is False
+            assert rotas_usuarios._usuario_admin_ativo_unico(principal) is (len(admins) == 1)
+            assert rotas_usuarios._usuario_admin_ativo_unico(inativo) is False
         finally:
             db.session.delete(inativo)
             db.session.commit()
@@ -203,12 +203,12 @@ def test_usuario_nao_admin_nao_gerencia_usuarios(client, usuario_comum, flask_ap
 # --- Expiração por inatividade ----------------------------------------------------------
 
 def test_sessao_expira_por_inatividade(client, usuario_comum):
-    import main
+    import nucleo
 
     _login(client, usuario_comum)
     assert client.get('/').status_code == 200
     with client.session_transaction() as sess:
-        sess['ultimo_acesso'] = int(time.time()) - main.SESSAO_INATIVIDADE_MINUTOS * 60 - 5
+        sess['ultimo_acesso'] = int(time.time()) - nucleo.SESSAO_INATIVIDADE_MINUTOS * 60 - 5
     r = client.get('/', follow_redirects=True)
     assert 'expirou por inatividade'.encode() in r.data
     with client.session_transaction() as sess:

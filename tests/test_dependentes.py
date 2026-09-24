@@ -122,7 +122,7 @@ def test_planilha_xlsx_tem_aba_de_dependentes(admin_client):
 
 
 def test_conversao_do_texto_antigo_roda_uma_vez(admin_client, flask_app):
-    import main
+    import nucleo
 
     dados = _novo()
     admin_client.post('/cadastro', data=dados)
@@ -135,8 +135,8 @@ def test_conversao_do_texto_antigo_roda_uma_vez(admin_client, flask_app):
         with db.engine.begin() as conn:
             conn.execute(text("DELETE FROM sgc_meta WHERE chave = 'dependentes_convertidos'"))
 
-        main._converter_dependentes_legados()
-        main._converter_dependentes_legados()  # segunda vez não duplica
+        nucleo._converter_dependentes_legados()
+        nucleo._converter_dependentes_legados()  # segunda vez não duplica
         db.session.expire_all()
 
         deps = db.session.get(Associado, aid).dependentes

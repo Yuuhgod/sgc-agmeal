@@ -43,11 +43,11 @@ def _get(flask_app, aid):
 # --- Consentimento ----------------------------------------------------------------------
 
 def test_consentimento_no_cadastro(admin_client, flask_app):
-    import main
+    import rotas_lgpd
 
     aid = _cadastrar(admin_client, flask_app, consentimento=True)
     a = _get(flask_app, aid)
-    assert a.consentimento_versao == main.TERMO_CONSENTIMENTO_VERSAO
+    assert a.consentimento_versao == rotas_lgpd.TERMO_CONSENTIMENTO_VERSAO
     assert a.consentimento_por == 'admin' and a.consentimento_data.date() == date.today()
     assert _get(flask_app, _cadastrar(admin_client, flask_app)).consentimento_data is None
 
@@ -119,7 +119,7 @@ def test_confirmacao_errada_nao_anonimiza(admin_client, flask_app):
 
 
 def test_anonimizar_apaga_dados_e_limpa_auditoria(admin_client, flask_app):
-    import main
+    import nucleo
 
     aid = _cadastrar(admin_client, flask_app, consentimento=True,
                      dependentes=[('Dependente Secreto', 'Cônjuge', '', '')])
@@ -129,7 +129,7 @@ def test_anonimizar_apaga_dados_e_limpa_auditoria(admin_client, flask_app):
 
     # Foto no disco, para conferir que é apagada.
     foto = f'lgpd_{uuid.uuid4().hex[:6]}.jpg'
-    caminho_foto = os.path.join(main.UPLOAD_FOLDER, foto)
+    caminho_foto = os.path.join(nucleo.UPLOAD_FOLDER, foto)
     with open(caminho_foto, 'wb') as fh:
         fh.write(b'\xff\xd8\xff' + b'0' * 20)
     with flask_app.app_context():
