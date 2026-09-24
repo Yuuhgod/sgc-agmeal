@@ -117,10 +117,26 @@
         });
     }
 
+    /**
+     * Formulários com `data-confirmar="mensagem"` pedem confirmação antes de enviar.
+     * (A mensagem vem escapada pelo Jinja no atributo; sem JS inline com aspas frágeis.)
+     */
+    function initConfirmacoes() {
+        document.addEventListener("submit", function (ev) {
+            var form = ev.target;
+            var msg = form.getAttribute && form.getAttribute("data-confirmar");
+            if (msg && !window.confirm(msg)) {
+                ev.preventDefault();
+                ev.stopImmediatePropagation();
+            }
+        }, true);
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         autoFecharAlertas();
         initFormSubmitLoading();
         initPdfLinkLoading();
         initEditorDependentes();
+        initConfirmacoes();
     });
 })();

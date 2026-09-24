@@ -8,6 +8,8 @@ quem quiser empacotar o mesmo código noutro ambiente.
 
 ## Funcionalidades
 - **Autenticação:** login com setup guiado de primeira execução e rate limiting.
+- **Gestão de usuários (admin):** criar, editar perfil (admin/usuário), desativar/reativar (bloqueia o acesso na hora, preservando o histórico), redefinir senha com senha provisória e excluir. Contas novas e senhas redefinidas obrigam o usuário a criar a própria senha no primeiro acesso. O sistema nunca fica sem um administrador ativo.
+- **Sessão:** encerrada após `SESSAO_INATIVIDADE_MINUTOS` sem uso (padrão 30) e revalidada no banco a cada acesso.
 - **Recuperação de Acesso:** fluxo de redefinição de senha via Frase de Segurança.
 - **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
@@ -82,6 +84,7 @@ bash start.sh      # inicia o servidor
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `SGC_DATA_DIR` | `data/` na raiz do projeto | Pasta com o banco, backups e segredo de sessão. Os testes usam uma pasta temporária por aqui. |
+| `SESSAO_INATIVIDADE_MINUTOS` | `30` | Minutos sem uso até a sessão expirar (o limite absoluto continua 8 horas). |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |

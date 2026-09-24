@@ -17,12 +17,13 @@
                     <tr>
                         <th class="ps-4">Usuário</th>
                         <th>Perfil</th>
+                        <th>Acesso</th>
                         <th class="text-center pe-4">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for u in usuarios %}
-                    <tr>
+                    <tr {% if not u.ativo %}class="text-muted"{% endif %}>
                         <td class="ps-4">
                             <strong class="text-capitalize">{{ u.username }}</strong>
                             {% if u.id == usuario_id_atual %}
@@ -40,23 +41,34 @@
                                 </span>
                             {% endif %}
                         </td>
+                        <td>
+                            {% if u.ativo %}
+                                <span class="badge text-bg-success">Ativo</span>
+                            {% else %}
+                                <span class="badge text-bg-secondary"><i class="fa-solid fa-ban me-1"></i>Desativado</span>
+                            {% endif %}
+                            {% if u.trocar_senha %}
+                                <span class="badge text-bg-warning" title="Precisa criar a própria senha no próximo acesso"><i class="fa-solid fa-key me-1"></i>Senha provisória</span>
+                            {% endif %}
+                        </td>
                         <td class="text-center pe-4">
+                            <a href="{{ url_for('editar_usuario', id=u.id) }}" class="btn btn-sm btn-outline-primary" title="Editar usuário" aria-label="Editar usuário">
+                                <i class="fa-solid fa-pen"></i>
+                            </a>
                             {% if u.id != usuario_id_atual %}
                             <form action="{{ url_for('excluir_usuario', id=u.id) }}" method="POST" class="d-inline"
-                                  onsubmit="return confirm('Tem certeza que deseja remover o usuário ' + {{ u.username | tojson }} + '?');">
+                                  data-confirmar="Remover o usuário {{ u.username }} definitivamente?&#10;&#10;Para só bloquear o acesso, use Editar &gt; Desativar.">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir usuário" aria-label="Excluir usuário">
                                     <i class="fa-solid fa-trash"></i>
                                 </button>
                             </form>
-                            {% else %}
-                            <span class="text-muted small">—</span>
                             {% endif %}
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="3" class="text-center py-5 text-muted">
+                        <td colspan="4" class="text-center py-5 text-muted">
                             <i class="fa-solid fa-users-slash fa-3x mb-3 opacity-25"></i><br>
                             Nenhum usuário cadastrado.
                         </td>

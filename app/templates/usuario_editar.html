@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}SGC - Editar Usuário{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-3">
+    <div class="col-lg-7">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header card-header-agmeal d-flex justify-content-between align-items-center">
+                <span><i class="fa-solid fa-user-gear me-2"></i>Usuário: <strong>{{ usuario.username }}</strong>
+                    {% if not usuario.ativo %}<span class="badge text-bg-secondary ms-1">Desativado</span>{% endif %}
+                    {% if usuario.trocar_senha %}<span class="badge text-bg-warning ms-1">Senha provisória</span>{% endif %}
+                </span>
+                <a href="{{ url_for('listar_usuarios') }}" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Voltar</a>
+            </div>
+            <div class="card-body">
+                {% if eh_voce %}
+                <div class="alert alert-secondary border-0 mb-0">
+                    <i class="fa-solid fa-circle-info me-2"></i>Esta é a sua conta. Para mudar o seu nome ou senha use
+                    <a href="{{ url_for('perfil') }}">Meu perfil</a>; perfil de acesso e desativação só podem ser alterados por outro administrador.
+                </div>
+                {% else %}
+                <form action="{{ url_for('editar_usuario', id=usuario.id) }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <h6 class="fw-bold mb-3">Perfil e acesso</h6>
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="role">Perfil</label>
+                            <select class="form-select" name="role" id="role" {% if unico_admin %}disabled{% endif %}>
+                                <option value="usuario" {% if usuario.role == 'usuario' %}selected{% endif %}>Usuário</option>
+                                <option value="admin" {% if usuario.role == 'admin' %}selected{% endif %}>Administrador</option>
+                            </select>
+                            {% if unico_admin %}<input type="hidden" name="role" value="admin">{% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" role="switch" name="ativo" value="1" id="ativo"
+                                       {% if usuario.ativo %}checked{% endif %} {% if unico_admin %}disabled{% endif %}>
+                                <label class="form-check-label" for="ativo">Conta ativa (pode entrar no sistema)</label>
+                            </div>
+                            {% if unico_admin %}<input type="hidden" name="ativo" value="1">{% endif %}
+                        </div>
+                    </div>
+                    {% if unico_admin %}
+                    <p class="small text-muted mt-2 mb-0"><i class="fa-solid fa-lock me-1"></i>Único administrador ativo: não pode ser rebaixado nem desativado.</p>
+                    {% else %}
+                    <p class="small text-muted mt-2 mb-0">Desativar bloqueia o acesso imediatamente (inclusive sessões abertas) sem apagar o usuário nem o histórico.</p>
+                    {% endif %}
+                    <div class="d-flex justify-content-end mt-3">
+                        <button type="submit" class="btn btn-primary-agmeal fw-bold px-4"><i class="fa-solid fa-save me-2"></i>Salvar</button>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if not eh_voce %}
+        <div class="card shadow-sm border-0 border-top border-warning border-3">
+            <div class="card-body">
+                <h6 class="fw-bold"><i class="fa-solid fa-key me-2 text-warning"></i>Redefinir senha</h6>
+                <p class="small text-muted">Defina uma senha provisória e informe-a pessoalmente ao usuário. No próximo acesso ele será obrigado a criar uma senha nova.</p>
+                <form action="{{ url_for('redefinir_senha_usuario', id=usuario.id) }}" method="POST" autocomplete="off">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="senha_provisoria">Senha provisória</label>
+                            <input type="password" class="form-control" name="senha_provisoria" id="senha_provisoria" minlength="8" required autocomplete="new-password">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="senha_provisoria_confirmacao">Confirmar</label>
+                            <input type="password" class="form-control" name="senha_provisoria_confirmacao" id="senha_provisoria_confirmacao" minlength="8" required autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end mt-3">
+                        <button type="submit" class="btn btn-warning fw-bold text-dark px-4">Definir senha provisória</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

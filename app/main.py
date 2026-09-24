@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
@@ -45,7 +46,10 @@ from database import (
     ACAO_SISTEMA_BACKUP,
     ACAO_SISTEMA_RESTORE,
     ACAO_USUARIO_CRIAR,
+    ACAO_USUARIO_EDITAR,
     ACAO_USUARIO_EXCLUIR,
+    ACAO_USUARIO_SENHA_REDEFINIDA,
+    ACAO_USUARIO_SENHA_TROCADA,
     ACAO_USUARIO_PALAVRA,
     ACAO_USUARIO_PERFIL,
     ACOES_ROTULOS,
@@ -154,6 +158,9 @@ limiter = Limiter(
 # instalação, independentemente do número de workers.
 LOGIN_MAX_FALHAS_IP = max(1, int(os.environ.get('LOGIN_MAX_FALHAS_IP', '10')))
 LOGIN_JANELA_MINUTOS = max(1, int(os.environ.get('LOGIN_JANELA_MINUTOS', '5')))
+
+# Sessão parada por mais tempo que isto é encerrada (além do limite absoluto de 8 horas).
+SESSAO_INATIVIDADE_MINUTOS = max(1, int(os.environ.get('SESSAO_INATIVIDADE_MINUTOS', '30')))
 
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads', 'fotos')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -280,33 +287,44 @@ def _garantir_coluna_role():
 
 
 # Colunas acrescentadas depois da primeira versão (bancos antigos não as têm).
-# Também aplicadas pela migração Alembic equivalente, para quem usa `flask db upgrade`.
-COLUNAS_NOVAS_ASSOCIADOS = (
-    ('situacao', "VARCHAR(20) NOT NULL DEFAULT 'ativo'"),
-    ('situacao_data', 'DATE'),
-    ('situacao_motivo', 'VARCHAR(200)'),
-)
+# Também aplicadas pelas migrações Alembic equivalentes, para quem usa `flask db upgrade`.
+COLUNAS_NOVAS = {
+    'associados': (
+        ('situacao', "VARCHAR(20) NOT NULL DEFAULT 'ativo'"),
+        ('situacao_data', 'DATE'),
+        ('situacao_motivo', 'VARCHAR(200)'),
+    ),
+    'usuarios': (
+        ('ativo', 'BOOLEAN NOT NULL DEFAULT 1'),
+        ('trocar_senha', 'BOOLEAN NOT NULL DEFAULT 0'),
+    ),
+}
 
 
-def _garantir_colunas_associados():
-    """Mini-migração idempotente para a tabela de associados (situação cadastral).
+def _garantir_colunas_novas():
+    """Mini-migração idempotente das colunas acrescentadas depois da primeira versão.
 
-    Associados já existentes ficam como 'ativo'. Tolerante a corrida entre workers."""
+    Registros existentes recebem o padrão (associado 'ativo', usuário ativo e sem troca
+    de senha pendente). Tolerante a corrida entre workers."""
     inspector = inspect(db.engine)
-    if 'associados' not in inspector.get_table_names():
-        return
-    existentes = {c['name'] for c in inspector.get_columns('associados')}
-    for nome, ddl in COLUNAS_NOVAS_ASSOCIADOS:
-        if nome in existentes:
+    tabelas = set(inspector.get_table_names())
+    for tabela, colunas in COLUNAS_NOVAS.items():
+        if tabela not in tabelas:
             continue
-        try:
-            with db.engine.begin() as conn:
-                conn.execute(text(f'ALTER TABLE associados ADD COLUMN {nome} {ddl}'))
-            app.logger.info("Coluna '%s' adicionada em 'associados'.", nome)
-        except Exception as exc:
-            if 'duplicate column' in str(exc).lower():
+        existentes = {c['name'] for c in inspector.get_columns(tabela)}
+        for nome, ddl in colunas:
+            if nome in existentes:
                 continue
-            raise
+            try:
+                with db.engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {tabela} ADD COLUMN {nome} {ddl}'))
+                app.logger.info("Coluna '%s' adicionada em '%s'.", nome, tabela)
+            except Exception as exc:
+                if 'duplicate column' in str(exc).lower():
+                    continue
+                raise
+    if 'associados' not in tabelas:
+        return
     with db.engine.begin() as conn:
         conn.execute(text(
             'CREATE INDEX IF NOT EXISTS ix_associados_situacao ON associados (situacao)'
@@ -365,7 +383,7 @@ def _garantir_schema():
     """Deixa o banco no formato atual. Idempotente: roda ao iniciar e após restaurar backup."""
     _criar_tabelas()
     _garantir_coluna_role()
-    _garantir_colunas_associados()
+    _garantir_colunas_novas()
     _converter_dependentes_legados()
 
 
@@ -405,24 +423,42 @@ def verificar_primeiro_acesso():
 
 @app.before_request
 def sincronizar_sessao_com_banco():
-    """Revalida a sessão a cada requisição: se o usuário foi excluído, encerra a sessão;
-    caso contrário, atualiza papel e nome a partir do banco (um admin rebaixado perde o
-    acesso administrativo imediatamente, sem esperar a sessão expirar)."""
+    """Revalida a sessão a cada requisição contra o banco:
+
+    - usuário excluído ou desativado: encerra a sessão;
+    - sessão parada há mais de SESSAO_INATIVIDADE_MINUTOS: encerra a sessão;
+    - papel e nome vêm do banco (um admin rebaixado perde o acesso na hora);
+    - senha provisória pendente: só deixa acessar a troca de senha e o logout."""
     if request.endpoint == 'static' and not request.path.startswith('/static/uploads/'):
         return
     usuario_id = session.get('usuario_id')
     if usuario_id is None:
         return
     usuario = db.session.get(Usuario, usuario_id)
-    if usuario is None:
+    if usuario is None or not usuario.ativo:
         session.clear()
-        flash('Sua sessão foi encerrada porque o usuário não existe mais.', 'warning')
+        motivo = 'o usuário não existe mais' if usuario is None else 'a conta foi desativada'
+        flash(f'Sua sessão foi encerrada porque {motivo}.', 'warning')
         return redirect(url_for('login'))
+
+    agora = int(time.time())
+    ultimo = session.get('ultimo_acesso', agora)
+    if agora - ultimo > SESSAO_INATIVIDADE_MINUTOS * 60:
+        session.clear()
+        flash('Sua sessão expirou por inatividade. Entre novamente.', 'warning')
+        return redirect(url_for('login'))
+    # Atualiza no máximo uma vez por minuto (evita reenviar o cookie em toda resposta).
+    if agora - ultimo >= 60 or 'ultimo_acesso' not in session:
+        session['ultimo_acesso'] = agora
+
     # Só grava se mudou, para não reenviar o cookie de sessão em toda resposta.
     if session.get('role') != usuario.role:
         session['role'] = usuario.role
     if session.get('username') != usuario.username:
         session['username'] = usuario.username
+
+    if usuario.trocar_senha and request.endpoint not in ('trocar_senha', 'logout', 'static'):
+        return redirect(url_for('trocar_senha'))
 
 
 @app.before_request
@@ -623,11 +659,25 @@ def login():
 
         usuario = Usuario.query.filter_by(username=username).first()
 
+        if usuario and usuario.check_senha(senha) and not usuario.ativo:
+            # Só revelado a quem acertou a senha: não serve para descobrir contas.
+            app.logger.warning('Login recusado (conta desativada): %s', username)
+            registrar_auditoria(
+                ACAO_AUTH_LOGIN_FALHOU,
+                descricao=f'Conta desativada: "{username}"',
+                usuario_id=usuario.id,
+                usuario_username=usuario.username,
+                commit=True,
+            )
+            flash('Esta conta está desativada. Procure um administrador.', 'danger')
+            return render_template('login.html')
+
         if usuario and usuario.check_senha(senha):
             session.clear()
             session['usuario_id'] = usuario.id
             session['username'] = usuario.username
             session['role'] = usuario.role
+            session['ultimo_acesso'] = int(time.time())
             session.permanent = True
             app.logger.info('Login bem-sucedido: %s (role=%s)', username, usuario.role)
             registrar_auditoria(
@@ -695,7 +745,7 @@ def esqueci_senha():
         usuario = Usuario.query.filter_by(username=username).first()
 
         # Frases novas são gravadas sem espaços nas pontas; as antigas podem tê-los.
-        palavra_ok = usuario is not None and (
+        palavra_ok = usuario is not None and usuario.ativo and (
             usuario.verificar_palavra_recuperacao(palavra)
             or (palavra.strip() != palavra and usuario.verificar_palavra_recuperacao(palavra.strip()))
         )
@@ -707,6 +757,7 @@ def esqueci_senha():
 
             usuario.migrar_palavra_recuperacao_se_legado(palavra)
             usuario.set_senha(nova_senha)
+            usuario.trocar_senha = False
             registrar_auditoria(
                 ACAO_AUTH_RECUPERACAO,
                 entidade='usuario',
@@ -1386,6 +1437,7 @@ def perfil():
                 flash('A nova senha não pode ser igual à atual.', 'warning')
                 return redirect(url_for('perfil'))
             usuario.set_senha(nova_senha)
+            usuario.trocar_senha = False
             senha_alterada = True
 
         # Aplica mudança de username somente após passar todas as validações.
@@ -1509,6 +1561,8 @@ def criar_usuario():
 
         novo = Usuario(username=novo_username, role=role)
         novo.set_senha(senha)
+        # Padrão: quem cria a conta conhece a senha, então o usuário troca no primeiro acesso.
+        novo.trocar_senha = request.form.get('trocar_senha') == '1'
         novo.set_palavra_recuperacao(palavra)
 
         try:
@@ -1536,6 +1590,137 @@ def criar_usuario():
     return render_template('usuario_novo.html', username=session.get('username'))
 
 
+def _usuario_admin_ativo_unico(usuario):
+    """True se `usuario` é o único administrador ativo (não pode perder o acesso de admin)."""
+    if usuario.role != ROLE_ADMIN or not usuario.ativo:
+        return False
+    return Usuario.query.filter_by(role=ROLE_ADMIN, ativo=True).count() <= 1
+
+
+@app.route('/usuarios/<int:id>/editar', methods=['GET', 'POST'])
+@admin_required
+def editar_usuario(id):
+    usuario = db.session.get(Usuario, id)
+    if not usuario:
+        flash('Usuário não encontrado.', 'danger')
+        return redirect(url_for('listar_usuarios'))
+    eh_voce = usuario.id == session.get('usuario_id')
+
+    if request.method == 'POST':
+        if eh_voce:
+            flash('Você não pode alterar o próprio perfil ou acesso. Peça a outro administrador.', 'warning')
+            return redirect(url_for('editar_usuario', id=id))
+
+        role = request.form.get('role', '').strip()
+        ativo = request.form.get('ativo') == '1'
+        if role not in ROLES_VALIDAS:
+            flash('Perfil inválido.', 'danger')
+            return redirect(url_for('editar_usuario', id=id))
+        if _usuario_admin_ativo_unico(usuario) and (role != ROLE_ADMIN or not ativo):
+            flash('Este é o único administrador ativo: não pode ser rebaixado nem desativado.', 'warning')
+            return redirect(url_for('editar_usuario', id=id))
+
+        mudancas = []
+        if usuario.role != role:
+            mudancas.append(f'perfil: "{usuario.role}" → "{role}"')
+            usuario.role = role
+        if usuario.ativo != ativo:
+            mudancas.append('acesso: ' + ('reativado' if ativo else 'desativado'))
+            usuario.ativo = ativo
+        if not mudancas:
+            flash('Nenhuma alteração para salvar.', 'info')
+            return redirect(url_for('listar_usuarios'))
+
+        registrar_auditoria(
+            ACAO_USUARIO_EDITAR,
+            entidade='usuario',
+            entidade_id=usuario.id,
+            descricao=f'{usuario.username}',
+            detalhes='\n'.join(mudancas),
+        )
+        db.session.commit()
+        app.logger.info('Usuário %s editado por %s: %s', usuario.username, session.get('username'), mudancas)
+        flash(f'Usuário "{usuario.username}" atualizado.', 'success')
+        return redirect(url_for('listar_usuarios'))
+
+    return render_template(
+        'usuario_editar.html',
+        username=session.get('username'),
+        usuario=usuario,
+        eh_voce=eh_voce,
+        unico_admin=_usuario_admin_ativo_unico(usuario),
+    )
+
+
+@app.route('/usuarios/<int:id>/redefinir_senha', methods=['POST'])
+@admin_required
+def redefinir_senha_usuario(id):
+    usuario = db.session.get(Usuario, id)
+    if not usuario:
+        flash('Usuário não encontrado.', 'danger')
+        return redirect(url_for('listar_usuarios'))
+    if usuario.id == session.get('usuario_id'):
+        flash('Para trocar a sua própria senha, use "Meu perfil".', 'warning')
+        return redirect(url_for('editar_usuario', id=id))
+
+    senha = request.form.get('senha_provisoria', '')
+    if len(senha) < 8:
+        flash('A senha provisória deve ter no mínimo 8 caracteres.', 'danger')
+        return redirect(url_for('editar_usuario', id=id))
+    if senha != request.form.get('senha_provisoria_confirmacao', ''):
+        flash('A confirmação não confere com a senha provisória.', 'danger')
+        return redirect(url_for('editar_usuario', id=id))
+
+    usuario.set_senha(senha)
+    usuario.trocar_senha = True
+    registrar_auditoria(
+        ACAO_USUARIO_SENHA_REDEFINIDA,
+        entidade='usuario',
+        entidade_id=usuario.id,
+        descricao=f'Senha provisória definida para {usuario.username}',
+    )
+    db.session.commit()
+    app.logger.info('Senha de %s redefinida por %s', usuario.username, session.get('username'))
+    flash(
+        f'Senha provisória definida para "{usuario.username}". Informe-a pessoalmente; '
+        'no próximo acesso será obrigatório criar uma senha nova.',
+        'success',
+    )
+    return redirect(url_for('listar_usuarios'))
+
+
+@app.route('/trocar_senha', methods=['GET', 'POST'])
+@login_required
+def trocar_senha():
+    """Troca obrigatória da senha provisória (definida por um admin ou na criação da conta)."""
+    usuario = db.session.get(Usuario, session['usuario_id'])
+    if not usuario.trocar_senha:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        nova = request.form.get('nova_senha', '')
+        if len(nova) < 8:
+            flash('A nova senha deve ter no mínimo 8 caracteres.', 'danger')
+        elif nova != request.form.get('confirmacao', ''):
+            flash('A confirmação não confere com a nova senha.', 'danger')
+        elif usuario.check_senha(nova):
+            flash('A nova senha não pode ser igual à senha provisória.', 'warning')
+        else:
+            usuario.set_senha(nova)
+            usuario.trocar_senha = False
+            registrar_auditoria(
+                ACAO_USUARIO_SENHA_TROCADA,
+                entidade='usuario',
+                entidade_id=usuario.id,
+                descricao=f'{usuario.username} criou a própria senha',
+            )
+            db.session.commit()
+            flash('Senha criada com sucesso. Bem-vindo!', 'success')
+            return redirect(url_for('dashboard'))
+
+    return render_template('trocar_senha.html', username=session.get('username'))
+
+
 @app.route('/usuarios/<int:id>/excluir', methods=['POST'])
 @admin_required
 def excluir_usuario(id):
@@ -1550,8 +1735,7 @@ def excluir_usuario(id):
 
     # Impede remover o último administrador do sistema.
     if usuario.role == ROLE_ADMIN:
-        total_admins = Usuario.query.filter_by(role=ROLE_ADMIN).count()
-        if total_admins <= 1:
+        if _usuario_admin_ativo_unico(usuario) or Usuario.query.filter_by(role=ROLE_ADMIN).count() <= 1:
             flash('Não é possível excluir o último administrador do sistema.', 'warning')
             return redirect(url_for('listar_usuarios'))
 

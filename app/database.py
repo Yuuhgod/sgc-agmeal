@@ -33,6 +33,11 @@ class Usuario(db.Model):
     # Papel: 'admin' (gerencia usuários) ou 'usuario' (acesso padrão).
     role = db.Column(db.String(20), nullable=False, default=ROLE_USUARIO)
 
+    # Conta desativada não entra no sistema, mas o usuário e o histórico são preservados.
+    ativo = db.Column(db.Boolean, nullable=False, default=True, server_default='1')
+    # Senha provisória (definida por um admin ou na criação): obriga a troca no próximo acesso.
+    trocar_senha = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+
     @property
     def is_admin(self):
         return self.role == ROLE_ADMIN
@@ -152,6 +157,9 @@ ACAO_USUARIO_CRIAR = 'usuario.criar'
 ACAO_USUARIO_EXCLUIR = 'usuario.excluir'
 ACAO_USUARIO_PERFIL = 'usuario.perfil_alterado'
 ACAO_USUARIO_PALAVRA = 'usuario.palavra_alterada'
+ACAO_USUARIO_EDITAR = 'usuario.editado'
+ACAO_USUARIO_SENHA_REDEFINIDA = 'usuario.senha_redefinida'
+ACAO_USUARIO_SENHA_TROCADA = 'usuario.senha_trocada'
 ACAO_AUTH_LOGIN = 'auth.login'
 ACAO_AUTH_LOGOUT = 'auth.logout'
 ACAO_AUTH_LOGIN_FALHOU = 'auth.login_falhou'
@@ -169,6 +177,9 @@ ACOES_ROTULOS = {
     ACAO_USUARIO_EXCLUIR: 'Excluiu usuário',
     ACAO_USUARIO_PERFIL: 'Alterou perfil próprio',
     ACAO_USUARIO_PALAVRA: 'Alterou frase de segurança',
+    ACAO_USUARIO_EDITAR: 'Editou usuário (perfil/acesso)',
+    ACAO_USUARIO_SENHA_REDEFINIDA: 'Redefiniu senha de outro usuário',
+    ACAO_USUARIO_SENHA_TROCADA: 'Trocou a senha provisória',
     ACAO_AUTH_LOGIN: 'Entrou no sistema',
     ACAO_AUTH_LOGOUT: 'Saiu do sistema',
     ACAO_AUTH_LOGIN_FALHOU: 'Tentativa de login (falhou)',
