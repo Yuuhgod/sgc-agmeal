@@ -27,6 +27,7 @@ from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import extract, inspect, text
+from sqlalchemy.orm import selectinload
 from weasyprint import HTML
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
@@ -50,6 +51,9 @@ from database import (
     ACOES_ROTULOS,
     Associado,
     Auditoria,
+    Dependente,
+    PARENTESCO_NAO_INFORMADO,
+    PARENTESCOS,
     ROLE_ADMIN,
     ROLE_USUARIO,
     ROLES_VALIDAS,
@@ -309,12 +313,44 @@ def _garantir_colunas_associados():
         ))
 
 
-def _garantir_schema():
-    _garantir_coluna_role()
-    _garantir_colunas_associados()
+def _separar_nomes_legados(texto):
+    """'Maria, João; Ana' -> ['Maria', 'João', 'Ana'] (limite de 100 caracteres por nome)."""
+    return [n.strip()[:100] for n in re.split(r'[,;\n]+', texto or '') if n.strip()]
 
 
-with app.app_context():
+def _converter_dependentes_legados():
+    """Converte, uma única vez, o texto livre de dependentes em registros da tabela nova.
+
+    A marca em `sgc_meta` é gravada na mesma transação da conversão; o INSERT OR IGNORE
+    serializa os workers do Gunicorn (só quem inserir a marca converte). Restaurar um
+    backup antigo (sem a marca) converte os dados dele."""
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE TABLE IF NOT EXISTS sgc_meta (chave VARCHAR(50) PRIMARY KEY, valor VARCHAR(200))'
+        ))
+        marcou = conn.execute(
+            text("INSERT OR IGNORE INTO sgc_meta (chave, valor) VALUES ('dependentes_convertidos', :v)"),
+            {'v': datetime.now().isoformat(timespec='seconds')},
+        ).rowcount
+        if not marcou:
+            return
+        linhas = conn.execute(text(
+            "SELECT id, dependentes FROM associados WHERE dependentes IS NOT NULL AND TRIM(dependentes) != ''"
+        )).all()
+        total = 0
+        for associado_id, texto_legado in linhas:
+            for nome in _separar_nomes_legados(texto_legado):
+                conn.execute(
+                    text('INSERT INTO dependentes_associado (associado_id, nome, parentesco) '
+                         'VALUES (:a, :n, :p)'),
+                    {'a': associado_id, 'n': nome, 'p': PARENTESCO_NAO_INFORMADO},
+                )
+                total += 1
+    if total:
+        app.logger.info('Dependentes convertidos do texto antigo: %s registro(s).', total)
+
+
+def _criar_tabelas():
     try:
         db.create_all()
     except Exception as exc:
@@ -323,6 +359,17 @@ with app.app_context():
             app.logger.info('Tabelas já existem (criadas por outro worker) — ignorando.')
         else:
             raise
+
+
+def _garantir_schema():
+    """Deixa o banco no formato atual. Idempotente: roda ao iniciar e após restaurar backup."""
+    _criar_tabelas()
+    _garantir_coluna_role()
+    _garantir_colunas_associados()
+    _converter_dependentes_legados()
+
+
+with app.app_context():
     _garantir_schema()
 
 
@@ -453,6 +500,7 @@ def inject_sessao():
         'sessao_is_admin': session.get('role') == ROLE_ADMIN,
         'sessao_role': session.get('role'),
         'situacoes': SITUACOES_ROTULOS,
+        'parentescos': PARENTESCOS,
     }
 
 
@@ -769,6 +817,76 @@ CAMPOS_ASSOCIADO_OBRIGATORIOS = {
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
+MAX_DEPENDENTES = 20
+
+
+def _dependentes_do_form(form):
+    """Linhas de dependentes do formulário (campos dep_* repetidos), como texto cru.
+    Linhas totalmente em branco são ignoradas."""
+    colunas = [form.getlist(f'dep_{c}') for c in ('nome', 'parentesco', 'nascimento', 'cpf')]
+    linhas = []
+    for nome, parentesco, nascimento, cpf in zip(*colunas):
+        linha = {
+            'nome': nome.strip(), 'parentesco': parentesco.strip(),
+            'nascimento': nascimento.strip(), 'cpf': cpf.strip(),
+        }
+        if linha['nome'] or linha['nascimento'] or linha['cpf']:
+            linhas.append(linha)
+    return linhas
+
+
+def _validar_dependentes(form, cpf_titular=None):
+    """Valida os dependentes do formulário. Retorna (lista de dicts para o modelo, erros)."""
+    erros, dependentes, cpfs = [], [], set()
+    hoje = datetime.now().date()
+    linhas = _dependentes_do_form(form)
+    if len(linhas) > MAX_DEPENDENTES:
+        erros.append(f'Informe no máximo {MAX_DEPENDENTES} dependentes.')
+        return [], erros
+
+    for n, linha in enumerate(linhas, start=1):
+        rotulo = f'Dependente {n}'
+        if not linha['nome']:
+            erros.append(f'{rotulo}: informe o nome.')
+        elif len(linha['nome']) > 100:
+            erros.append(f'{rotulo}: nome excede 100 caracteres.')
+        parentesco = linha['parentesco'] or PARENTESCO_NAO_INFORMADO
+        if parentesco not in PARENTESCOS:
+            erros.append(f'{rotulo}: parentesco inválido.')
+
+        nascimento = None
+        if linha['nascimento']:
+            try:
+                nascimento = datetime.strptime(linha['nascimento'], '%Y-%m-%d').date()
+                if nascimento.year < 1900 or nascimento > hoje:
+                    erros.append(f'{rotulo}: data de nascimento fora do intervalo permitido (1900 até hoje).')
+            except ValueError:
+                erros.append(f'{rotulo}: data de nascimento inválida.')
+
+        cpf = None
+        if linha['cpf']:
+            if not validar_cpf(linha['cpf']):
+                erros.append(f'{rotulo}: CPF inválido.')
+            else:
+                cpf = _normalizar_cpf(linha['cpf'])
+                if cpf == cpf_titular:
+                    erros.append(f'{rotulo}: o CPF é o mesmo do associado titular.')
+                elif cpf in cpfs:
+                    erros.append(f'{rotulo}: CPF repetido na lista de dependentes.')
+                cpfs.add(cpf)
+
+        dependentes.append({
+            'nome': linha['nome'], 'parentesco': parentesco,
+            'data_nascimento': nascimento, 'cpf': cpf,
+        })
+    return dependentes, erros
+
+
+def _resumo_dependentes(dependentes):
+    # Ordenado: a lista do formulário vem na ordem digitada, a do banco por nome.
+    return '; '.join(sorted(d.resumo() for d in dependentes)) or '(nenhum)'
+
+
 def _validar_dados_associado(form, associado_id=None):
     """Valida o formulário de associado. Retorna (dados, erros): `dados` já normalizados
     para gravar no modelo e `erros` com mensagens específicas para o usuário.
@@ -784,7 +902,6 @@ def _validar_dados_associado(form, associado_id=None):
         'telefone_whatsapp': form.get('telefone_whatsapp', '').strip(),
         'endereco': form.get('endereco', '').strip(),
         'email': form.get('email', '').strip(),
-        'dependentes': form.get('dependentes', '').strip(),
     }
 
     faltando = [
@@ -865,21 +982,32 @@ def _validar_dados_associado(form, associado_id=None):
     return dados, erros
 
 
+def _render_cadastro():
+    """Formulário de cadastro; num POST com erro, devolve as linhas de dependentes digitadas."""
+    return render_template(
+        'cadastro.html',
+        username=session.get('username'),
+        dependentes_form=_dependentes_do_form(request.form) if request.method == 'POST' else [],
+    )
+
+
 @app.route('/cadastro', methods=['GET', 'POST'])
 @login_required
 def cadastro():
     if request.method == 'POST':
         dados, erros = _validar_dados_associado(request.form)
+        dependentes, erros_dep = _validar_dependentes(request.form, cpf_titular=dados.get('cpf'))
+        erros += erros_dep
         if erros:
             for erro in erros:
                 flash(erro, 'danger')
-            return render_template('cadastro.html', username=session.get('username'))
+            return _render_cadastro()
 
         try:
             raw_foto, extensao = _processar_foto_base64(request.form.get('foto_base64'))
         except ValueError as exc:
             flash(str(exc), 'danger')
-            return render_template('cadastro.html', username=session.get('username'))
+            return _render_cadastro()
 
         nome_arquivo = None
         try:
@@ -890,6 +1018,7 @@ def cadastro():
                     fh.write(raw_foto)
 
             novo_associado = Associado(foto_perfil=nome_arquivo, **dados)
+            novo_associado.dependentes = [Dependente(**d) for d in dependentes]
             db.session.add(novo_associado)
             db.session.flush()  # gera o ID antes do commit p/ usar na auditoria
             registrar_auditoria(
@@ -908,9 +1037,9 @@ def cadastro():
             # Limpa foto recém-salva em caso de rollback (evita arquivo órfão).
             _remover_foto_do_disco(nome_arquivo)
             flash('Erro inesperado ao cadastrar. Tente novamente ou consulte o log do servidor.', 'danger')
-            return render_template('cadastro.html', username=session.get('username'))
+            return _render_cadastro()
 
-    return render_template('cadastro.html', username=session.get('username'))
+    return _render_cadastro()
 
 
 FILTROS_BUSCA = ('nome', 'matricula', 'ano', 'situacao')
@@ -986,7 +1115,9 @@ def exportar_pdf():
     filtros = _ler_filtros(request.form, sufixo='_export')
 
     try:
-        query = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros)
+        query = _aplicar_filtros_busca(
+            Associado.query.options(selectinload(Associado.dependentes)).order_by(Associado.nome), filtros,
+        )
         if _filtros_texto_vazios(filtros):
             max_sem = _exportar_pdf_max_sem_filtro()
             total = query.count()
@@ -1042,7 +1173,9 @@ def exportar_planilha():
 
     filtros = _ler_filtros(request.form, sufixo='_export')
     try:
-        associados = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros).all()
+        associados = _aplicar_filtros_busca(
+            Associado.query.options(selectinload(Associado.dependentes)).order_by(Associado.nome), filtros,
+        ).all()
     except ValueError:
         flash('Ano de admissão inválido.', 'warning')
         return redirect(url_for('buscar'))
@@ -1098,7 +1231,7 @@ def exportar_ficha(matricula):
 
 CAMPOS_ASSOCIADO_AUDITAVEIS = [
     'nome', 'matricula', 'rg', 'cpf', 'telefone', 'telefone_whatsapp',
-    'endereco', 'data_nascimento', 'email', 'data_admissao', 'dependentes',
+    'endereco', 'data_nascimento', 'email', 'data_admissao',
     'situacao', 'situacao_data', 'situacao_motivo',
 ]
 
@@ -1125,6 +1258,8 @@ def editar(id):
         nova_foto_nome = None
 
         dados, erros = _validar_dados_associado(request.form, associado_id=associado.id)
+        dependentes, erros_dep = _validar_dependentes(request.form, cpf_titular=dados.get('cpf'))
+        erros += erros_dep
         if erros:
             for erro in erros:
                 flash(erro, 'danger')
@@ -1132,8 +1267,10 @@ def editar(id):
 
         try:
             antes = {c: getattr(associado, c) for c in CAMPOS_ASSOCIADO_AUDITAVEIS}
+            dependentes_antes = _resumo_dependentes(associado.dependentes)
             for campo, valor in dados.items():
                 setattr(associado, campo, valor)
+            associado.dependentes = [Dependente(**d) for d in dependentes]
 
             foto = request.files.get('foto_perfil')
             if foto and foto.filename and allowed_file(foto.filename):
@@ -1155,6 +1292,10 @@ def editar(id):
                 associado.foto_perfil = nova_foto_nome
 
             detalhes = _diff_associado(antes, associado, foto_alterada=bool(nova_foto_nome))
+            dependentes_depois = _resumo_dependentes(associado.dependentes)
+            if dependentes_depois != dependentes_antes:
+                linha = f'dependentes: "{dependentes_antes}" → "{dependentes_depois}"'
+                detalhes = linha if detalhes == '(nenhum campo alterado)' else f'{detalhes}\n{linha}'
             registrar_auditoria(
                 ACAO_ASSOCIADO_EDITAR,
                 entidade='associado',

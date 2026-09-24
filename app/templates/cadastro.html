@@ -1,5 +1,7 @@
-{% extends "base.html" %} {% block title %}SGC - Novo Cadastro{% endblock %} {%
-block content %}
+{% extends "base.html" %}
+{% from "_macros.html" import editor_dependentes %}
+{% block title %}SGC - Novo Cadastro{% endblock %}
+{% block content %}
 <link
     href="{{ url_for('static', filename='vendor/cropperjs-1.6.1/cropper.min.css') }}"
     rel="stylesheet"
@@ -186,19 +188,10 @@ block content %}
                         required
                     />
                 </div>
-                <div class="col-md-9 mb-3">
-                    <label class="form-label fw-bold"
-                        >Dependentes (Opcional)</label
-                    >
-                    <input
-                        type="text"
-                        class="form-control"
-                        name="dependentes"
-                        value="{{ request.form.get('dependentes', '') }}"
-                        placeholder="Nome dos dependentes separados por vírgula"
-                    />
-                </div>
+
             </div>
+
+            {{ editor_dependentes(dependentes_form, parentescos) }}
 
             <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
                 <button

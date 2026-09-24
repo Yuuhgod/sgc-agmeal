@@ -12,6 +12,8 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
 - **Situação cadastral:** cada associado é *Ativo*, *Inativo* ou *Desligado*, com data e motivo. Inativar/desligar preserva o cadastro e o histórico (preferível a excluir). Filtros por situação na busca e na lista; o painel mostra os ativos e o total por situação.
+- **Dependentes:** cadastrados em tabela própria (nome, parentesco, nascimento e CPF opcionais), com linhas adicionáveis no cadastro/edição; aparecem na ficha PDF e numa aba própria da planilha Excel. A lista antiga em texto ("Maria, João") é convertida automaticamente uma única vez ao atualizar, com parentesco *Não informado*; o texto original fica guardado no banco como cópia de segurança.
+- **Painel:** aniversariantes do mês (ativos), gráfico de admissões por ano (últimos 10 anos) e contagem por situação.
 - **Planilhas:** exportação em **Excel (.xlsx)** e **CSV** (separado por `;`, abre direto no Excel em português) com os mesmos filtros da busca/lista. Cada exportação fica registrada na auditoria (quem, quantos registros e com quais filtros).
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
@@ -190,7 +192,7 @@ export FLASK_APP=main:app
 flask db upgrade
 ```
 
-As colunas novas (ex.: situação do associado) também são criadas **automaticamente ao
+As colunas e tabelas novas (ex.: situação do associado, dependentes) também são criadas **automaticamente ao
 iniciar o servidor** e após uma restauração de backup antigo, então instalações que
 não usam `flask db upgrade` continuam funcionando sem passo manual. As migrações são
 idempotentes: rodar `flask db upgrade` depois disso não causa erro.

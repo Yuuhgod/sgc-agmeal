@@ -25,7 +25,17 @@ COLUNAS = (
     ('WhatsApp', lambda a: a.telefone_whatsapp, 16),
     ('E-mail', lambda a: a.email, 30),
     ('Endereço', lambda a: a.endereco, 40),
-    ('Dependentes', lambda a: a.dependentes, 30),
+    ('Dependentes', lambda a: a.dependentes_resumo, 40),
+)
+
+# Aba "Dependentes" do XLSX: uma linha por dependente, ligada ao titular pela matrícula.
+COLUNAS_DEPENDENTES = (
+    ('Matrícula do titular', lambda a, d: a.matricula, 18),
+    ('Titular', lambda a, d: a.nome, 36),
+    ('Dependente', lambda a, d: d.nome, 36),
+    ('Parentesco', lambda a, d: d.parentesco, 16),
+    ('Data de nascimento', lambda a, d: d.data_nascimento, 14),
+    ('CPF', lambda a, d: d.cpf, 16),
 )
 
 # Textos iniciados por estes caracteres seriam interpretados como fórmula pelo Excel
@@ -59,18 +69,14 @@ def gerar_csv(associados) -> bytes:
     return buffer.getvalue().encode('utf-8-sig')
 
 
-def gerar_xlsx(associados) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Associados'
-
-    ws.append([titulo for titulo, _, _ in COLUNAS])
+def _preencher_aba(ws, colunas, linhas):
+    ws.append([titulo for titulo, _, _ in colunas])
     for cell in ws[1]:
         cell.font = Font(bold=True, color='FFFFFF')
         cell.fill = PatternFill('solid', fgColor=COR_CABECALHO)
         cell.alignment = Alignment(vertical='center')
 
-    for linha in _linhas(associados):
+    for linha in linhas:
         ws.append(linha)
         for cell in ws[ws.max_row]:
             if isinstance(cell.value, (date, datetime)):
@@ -79,10 +85,23 @@ def gerar_xlsx(associados) -> bytes:
                 # Força texto: o openpyxl gravaria "=..." como fórmula.
                 cell.data_type = 's'
 
-    for indice, (_, _, largura) in enumerate(COLUNAS, start=1):
+    for indice, (_, _, largura) in enumerate(colunas, start=1):
         ws.column_dimensions[get_column_letter(indice)].width = largura
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = ws.dimensions
+
+
+def gerar_xlsx(associados) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Associados'
+    _preencher_aba(ws, COLUNAS, _linhas(associados))
+
+    _preencher_aba(
+        wb.create_sheet('Dependentes'),
+        COLUNAS_DEPENDENTES,
+        ([extrair(a, d) for _, extrair, _ in COLUNAS_DEPENDENTES] for a in associados for d in a.dependentes),
+    )
 
     buffer = io.BytesIO()
     wb.save(buffer)

@@ -24,3 +24,56 @@
     </div>
 </form>
 {%- endmacro %}
+
+{# Uma linha do editor de dependentes. `d` é um dict (formulário) ou um Dependente (banco). #}
+{% macro _linha_dependente(parentescos, nome='', parentesco='', nascimento='', cpf='') -%}
+<div class="row g-2 align-items-end linha-dependente mb-2">
+    <div class="col-md-4">
+        <label class="form-label small fw-bold mb-1">Nome *</label>
+        <input type="text" class="form-control form-control-sm" name="dep_nome" value="{{ nome }}" maxlength="100">
+    </div>
+    <div class="col-md-3 col-6">
+        <label class="form-label small fw-bold mb-1">Parentesco</label>
+        <select class="form-select form-select-sm" name="dep_parentesco">
+            {% for p in parentescos %}
+            <option value="{{ p }}" {% if p == (parentesco or 'Não informado') %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2 col-6">
+        <label class="form-label small fw-bold mb-1">Nascimento</label>
+        <input type="date" class="form-control form-control-sm" name="dep_nascimento" value="{{ nascimento }}" max="2099-12-31">
+    </div>
+    <div class="col-md-2 col-9">
+        <label class="form-label small fw-bold mb-1">CPF</label>
+        <input type="text" class="form-control form-control-sm" name="dep_cpf" value="{{ cpf }}" maxlength="14" oninput="mascaraCPF(this)" placeholder="Opcional">
+    </div>
+    <div class="col-md-1 col-3 text-end">
+        <button type="button" class="btn btn-sm btn-outline-danger" data-remover-dependente title="Remover dependente" aria-label="Remover dependente">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+</div>
+{%- endmacro %}
+
+{# Editor de dependentes: linhas adicionáveis/removíveis (JS em app.js). #}
+{% macro editor_dependentes(dependentes, parentescos, do_banco=false) -%}
+<fieldset class="border rounded p-3 mt-2" data-editor-dependentes>
+    <legend class="float-none w-auto px-2 fs-6 fw-bold mb-0"><i class="fa-solid fa-people-roof me-2"></i>Dependentes</legend>
+    <div data-lista-dependentes>
+        {% for d in dependentes %}
+            {% if do_banco %}
+            {{ _linha_dependente(parentescos, d.nome, d.parentesco,
+                                 d.data_nascimento.strftime('%Y-%m-%d') if d.data_nascimento else '', d.cpf or '') }}
+            {% else %}
+            {{ _linha_dependente(parentescos, d.nome, d.parentesco, d.nascimento, d.cpf) }}
+            {% endif %}
+        {% endfor %}
+    </div>
+    <p class="text-muted small mb-2" data-sem-dependentes {% if dependentes %}hidden{% endif %}>Nenhum dependente informado.</p>
+    <button type="button" class="btn btn-sm btn-outline-primary" data-adicionar-dependente>
+        <i class="fa-solid fa-plus me-1"></i>Adicionar dependente
+    </button>
+    <template data-modelo-dependente>{{ _linha_dependente(parentescos) }}</template>
+</fieldset>
+{%- endmacro %}

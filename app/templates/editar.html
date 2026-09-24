@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import selo_situacao %}
+{% from "_macros.html" import selo_situacao, editor_dependentes %}
 
 {% block title %}SGC - Editar Associado{% endblock %}
 
@@ -77,11 +77,9 @@
                     <label class="form-label fw-bold">Data de Admissão *</label>
                     <input type="date" class="form-control" name="data_admissao" value="{{ associado.data_admissao.strftime('%Y-%m-%d') }}" required>
                 </div>
-                <div class="col-md-9 mb-3">
-                    <label class="form-label fw-bold">Dependentes (Opcional)</label>
-                    <input type="text" class="form-control" name="dependentes" value="{{ associado.dependentes or '' }}">
-                </div>
             </div>
+
+            {{ editor_dependentes(associado.dependentes, parentescos, do_banco=true) }}
 
             <fieldset class="border rounded p-3 mt-2">
                 <legend class="float-none w-auto px-2 fs-6 fw-bold mb-0"><i class="fa-solid fa-id-card-clip me-2"></i>Situação cadastral</legend>

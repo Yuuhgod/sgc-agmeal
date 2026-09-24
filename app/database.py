@@ -86,7 +86,9 @@ class Associado(db.Model):
     data_nascimento = db.Column(db.Date, nullable=False)
     email = db.Column(db.String(100), nullable=False)
     data_admissao = db.Column(db.Date, nullable=False)
-    dependentes = db.Column(db.Text, nullable=True)
+    # Texto livre da versão antiga ("Maria, João"). Convertido uma vez para a tabela de
+    # dependentes na inicialização e mantido só como cópia de segurança (não é mais editado).
+    dependentes_texto_legado = db.Column('dependentes', db.Text, nullable=True)
     data_criacao = db.Column(db.DateTime, default=_agora_utc)
 
     # Situação cadastral: desligar/inativar preserva o histórico (em vez de excluir).
@@ -97,9 +99,49 @@ class Associado(db.Model):
     situacao_data = db.Column(db.Date, nullable=True)
     situacao_motivo = db.Column(db.String(200), nullable=True)
 
+    dependentes = db.relationship(
+        'Dependente',
+        backref='titular',
+        cascade='all, delete-orphan',
+        order_by='Dependente.nome',
+    )
+
     @property
     def situacao_rotulo(self):
         return SITUACOES_ROTULOS.get(self.situacao, self.situacao)
+
+    @property
+    def dependentes_resumo(self):
+        """Texto curto para tabelas/planilhas: "Maria (Filho(a)); João (Cônjuge)"."""
+        return '; '.join(f'{d.nome} ({d.parentesco})' for d in self.dependentes)
+
+
+PARENTESCO_NAO_INFORMADO = 'Não informado'
+PARENTESCOS = (
+    'Cônjuge', 'Companheiro(a)', 'Filho(a)', 'Enteado(a)', 'Pai', 'Mãe',
+    'Irmão(ã)', 'Neto(a)', 'Outro', PARENTESCO_NAO_INFORMADO,
+)
+
+
+class Dependente(db.Model):
+    __tablename__ = 'dependentes_associado'
+
+    id = db.Column(db.Integer, primary_key=True)
+    associado_id = db.Column(
+        db.Integer, db.ForeignKey('associados.id', ondelete='CASCADE'), nullable=False, index=True,
+    )
+    nome = db.Column(db.String(100), nullable=False)
+    parentesco = db.Column(db.String(30), nullable=False, default=PARENTESCO_NAO_INFORMADO)
+    data_nascimento = db.Column(db.Date, nullable=True)
+    cpf = db.Column(db.String(14), nullable=True)
+
+    def resumo(self):
+        partes = [self.parentesco]
+        if self.data_nascimento:
+            partes.append(f'nasc. {self.data_nascimento.strftime("%d/%m/%Y")}')
+        if self.cpf:
+            partes.append(f'CPF {self.cpf}')
+        return f'{self.nome} ({", ".join(partes)})'
 
 
 # Tipos de ações registradas na trilha de auditoria.
