@@ -121,11 +121,11 @@ def test_lock_permite_um_so_agendador(tmp_path):
 
 
 def test_backup_automatico_registra_auditoria(flask_app):
-    import main
+    import nucleo
 
     with flask_app.app_context():
         antes = Auditoria.query.filter_by(acao=ACAO_SISTEMA_BACKUP, usuario_username='backup-automático').count()
-        info = main._executar_backup_automatico()
+        info = nucleo._executar_backup_automatico()
         assert os.path.isfile(info['zip_path'])
         depois = Auditoria.query.filter_by(acao=ACAO_SISTEMA_BACKUP, usuario_username='backup-automático').count()
     assert depois == antes + 1
@@ -134,27 +134,27 @@ def test_backup_automatico_registra_auditoria(flask_app):
 # --- Avisos -----------------------------------------------------------------------------
 
 def test_painel_alerta_admin_sem_backup_recente(admin_client, flask_app, monkeypatch):
-    import main
+    import nucleo
 
-    monkeypatch.setattr(main.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: None)
+    monkeypatch.setattr(nucleo.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: None)
     r = admin_client.get('/')
     assert 'Nenhum backup foi feito ainda'.encode() in r.data
 
-    monkeypatch.setattr(main.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 2.0)
-    monkeypatch.setattr(main.backup_agendador, 'ler_status', lambda *a: {})
+    monkeypatch.setattr(nucleo.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 2.0)
+    monkeypatch.setattr(nucleo.backup_agendador, 'ler_status', lambda *a: {})
     r = admin_client.get('/')
     assert 'Fazer backup agora'.encode() not in r.data
 
-    monkeypatch.setattr(main.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 24 * 10)
+    monkeypatch.setattr(nucleo.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 24 * 10)
     r = admin_client.get('/')
     assert 'O último backup tem 10 dias'.encode() in r.data
 
 
 def test_painel_mostra_falha_do_backup(admin_client, monkeypatch):
-    import main
+    import nucleo
 
-    monkeypatch.setattr(main.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 1.0)
-    monkeypatch.setattr(main.backup_agendador, 'ler_status', lambda *a: {
+    monkeypatch.setattr(nucleo.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: 1.0)
+    monkeypatch.setattr(nucleo.backup_agendador, 'ler_status', lambda *a: {
         'ultimo_sucesso': '2026-01-01T10:00:00', 'ultima_falha': '2026-01-02T10:00:00', 'erro': 'disco cheio',
     })
     r = admin_client.get('/')
@@ -164,11 +164,11 @@ def test_painel_mostra_falha_do_backup(admin_client, monkeypatch):
 
 
 def test_usuario_comum_nao_ve_alerta_de_backup(flask_app, monkeypatch):
-    import main
+    import nucleo
     from tests.test_correcoes_seguranca import _login
     from database import ROLE_USUARIO, Usuario, db
 
-    monkeypatch.setattr(main.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: None)
+    monkeypatch.setattr(nucleo.backup_agendador, 'idade_ultimo_backup_horas', lambda *a: None)
     with flask_app.app_context():
         u = Usuario(username='sem_alerta_backup', role=ROLE_USUARIO)
         u.set_senha('senha12345')

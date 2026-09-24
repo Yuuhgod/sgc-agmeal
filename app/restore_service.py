@@ -6,7 +6,9 @@ import json
 import logging
 import os
 import shutil
-import zipfile
+import sqlite3
+
+from backup_service import abrir_zip, zip_criptografado
 
 MARKER_NAME = '.sgc_restore_marker.json'
 
@@ -28,12 +30,35 @@ def membro_zip_permitido(name: str) -> bool:
     return False
 
 
-def extrair_zip_seguro(zip_path: str, dest_dir: str, log: logging.Logger) -> dict:
-    """Extrai apenas membros permitidos para dest_dir. Retorna resumo."""
+class SenhaBackupNecessaria(ValueError):
+    """O ZIP é protegido e nenhuma das senhas tentadas abriu o arquivo."""
+
+
+def extrair_zip_seguro(zip_path: str, dest_dir: str, log: logging.Logger, senhas=()) -> dict:
+    """Extrai apenas membros permitidos para dest_dir. Retorna resumo.
+
+    Para ZIP protegido, tenta as `senhas` na ordem (ex.: a digitada e a salva no servidor)."""
+    senha = None
+    if zip_criptografado(zip_path):
+        for candidata in [s for s in senhas if s]:
+            try:
+                with abrir_zip(zip_path, candidata) as zf:
+                    nomes = [i for i in zf.infolist() if not i.is_dir()]
+                    if nomes:
+                        zf.read(nomes[0])  # levanta RuntimeError se a senha estiver errada
+                senha = candidata
+                break
+            except RuntimeError:
+                continue
+        if senha is None:
+            raise SenhaBackupNecessaria(
+                'Este backup é protegido por senha e a senha informada (ou a salva neste '
+                'servidor) não abre o arquivo. Digite a senha dos backups.'
+            )
     fotos = 0
     tem_db = False
     tem_secret = False
-    with zipfile.ZipFile(zip_path, 'r') as zf:
+    with abrir_zip(zip_path, senha) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
@@ -50,7 +75,7 @@ def extrair_zip_seguro(zip_path: str, dest_dir: str, log: logging.Logger) -> dic
             raise ValueError('O ZIP não contém data/sgc.db (backup inválido ou incompleto).')
 
     os.makedirs(dest_dir, mode=0o700, exist_ok=True)
-    with zipfile.ZipFile(zip_path, 'r') as zf:
+    with abrir_zip(zip_path, senha) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
@@ -97,7 +122,21 @@ def aplicar_restauracao(
     dst_new = dst_db + '.novo'
 
     shutil.copy2(src_db, dst_new)
+    # Banco em WAL: grava o que estiver no -wal no banco atual e remove -wal/-shm antes da troca.
+    # Um -wal antigo ao lado do banco novo seria aplicado a ele e o corromperia.
+    if os.path.isfile(dst_db):
+        try:
+            conn = sqlite3.connect(dst_db, timeout=30)
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.close()
+        except sqlite3.Error as exc:
+            log.warning('Checkpoint do WAL antes da restauração falhou: %s', exc)
     os.replace(dst_new, dst_db)
+    for sufixo in ('-wal', '-shm'):
+        try:
+            os.remove(dst_db + sufixo)
+        except FileNotFoundError:
+            pass
     log.info('Banco substituído: %s', dst_db)
 
     src_fotos = os.path.join(extract_root, 'fotos')

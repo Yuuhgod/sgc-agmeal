@@ -7,8 +7,6 @@ import os
 import uuid
 from datetime import date
 
-import pytest
-
 from database import (
     ACAO_ASSOCIADO_ANONIMIZAR,
     ACAO_ASSOCIADO_CONSENTIMENTO,
@@ -19,7 +17,7 @@ from database import (
     db,
 )
 from tests.cpf_utils import cpf_digitos_validos
-from tests.test_correcoes_seguranca import _login, usuario_comum  # noqa: F401 (fixture)
+from tests.test_correcoes_seguranca import _login
 from tests.test_crud_associados import _payload_cadastro
 from tests.test_dependentes import _com_dependentes
 from tests.test_situacao_planilha import _payload_edicao
@@ -45,11 +43,11 @@ def _get(flask_app, aid):
 # --- Consentimento ----------------------------------------------------------------------
 
 def test_consentimento_no_cadastro(admin_client, flask_app):
-    import main
+    import rotas_lgpd
 
     aid = _cadastrar(admin_client, flask_app, consentimento=True)
     a = _get(flask_app, aid)
-    assert a.consentimento_versao == main.TERMO_CONSENTIMENTO_VERSAO
+    assert a.consentimento_versao == rotas_lgpd.TERMO_CONSENTIMENTO_VERSAO
     assert a.consentimento_por == 'admin' and a.consentimento_data.date() == date.today()
     assert _get(flask_app, _cadastrar(admin_client, flask_app)).consentimento_data is None
 
@@ -68,7 +66,7 @@ def test_revogar_e_registrar_na_edicao(admin_client, flask_app):
     assert _get(flask_app, aid).consentimento_data is not None
 
     with flask_app.app_context():
-        detalhes = [l.detalhes for l in Auditoria.query.filter_by(acao=ACAO_ASSOCIADO_CONSENTIMENTO, entidade_id=aid)
+        detalhes = [log.detalhes for log in Auditoria.query.filter_by(acao=ACAO_ASSOCIADO_CONSENTIMENTO, entidade_id=aid)
                     .order_by(Auditoria.id)]
     assert detalhes == ['consentimento registrado (termo versão 1.0)', 'consentimento revogado',
                         'consentimento registrado (termo versão 1.0)']
@@ -121,7 +119,7 @@ def test_confirmacao_errada_nao_anonimiza(admin_client, flask_app):
 
 
 def test_anonimizar_apaga_dados_e_limpa_auditoria(admin_client, flask_app):
-    import main
+    import nucleo
 
     aid = _cadastrar(admin_client, flask_app, consentimento=True,
                      dependentes=[('Dependente Secreto', 'Cônjuge', '', '')])
@@ -131,7 +129,7 @@ def test_anonimizar_apaga_dados_e_limpa_auditoria(admin_client, flask_app):
 
     # Foto no disco, para conferir que é apagada.
     foto = f'lgpd_{uuid.uuid4().hex[:6]}.jpg'
-    caminho_foto = os.path.join(main.UPLOAD_FOLDER, foto)
+    caminho_foto = os.path.join(nucleo.UPLOAD_FOLDER, foto)
     with open(caminho_foto, 'wb') as fh:
         fh.write(b'\xff\xd8\xff' + b'0' * 20)
     with flask_app.app_context():
@@ -160,7 +158,7 @@ def test_anonimizar_apaga_dados_e_limpa_auditoria(admin_client, flask_app):
         assert a.situacao_motivo is None and a.consentimento_data is None
         assert Dependente.query.filter_by(associado_id=aid).count() == 0
 
-        textos = ' '.join(f'{l.descricao} {l.detalhes}' for l in Auditoria.query.all())
+        textos = ' '.join(f'{log.descricao} {log.detalhes}' for log in Auditoria.query.all())
         for dado in (nome, cpf, 'Dependente Secreto'):
             assert dado not in textos, dado
         importacao = Auditoria.query.filter_by(descricao='importação').order_by(Auditoria.id.desc()).first()

@@ -23,13 +23,14 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup automático:** o próprio servidor gera um backup sempre que o último tiver mais de `BACKUP_AUTO_INTERVALO_HORAS` (padrão 24h). Verifica a cada 10 minutos, então um PC desligado à noite faz o backup logo depois de ligado. Só um processo do Gunicorn roda o agendador (lock de arquivo em `data/`). Todo backup, manual ou automático, é verificado (ZIP íntegro e banco sem corrupção) antes de ser guardado. O painel alerta os admins quando o último backup passa de `BACKUP_ALERTA_DIAS` ou quando a última tentativa falhou.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
+- **Backups criptografados:** com uma senha definida pelo admin na tela de backup (ou `BACKUP_SENHA` no ambiente), todo backup vira um ZIP **AES-256** — abre no **7-Zip** com a senha (o "Extrair" do Windows não abre AES). A senha fica em `data/.backup_senha` (fora do ZIP). **Anote-a em local seguro:** sem ela não há como restaurar o backup em outro computador. O painel alerta se os backups vão para a nuvem sem senha.
 - **Restaurar (admin):** upload de ZIP com confirmações explícitas (texto + caixa) e backup de segurança automático antes de substituir dados; ver secção *Restauração* abaixo.
 - **Interface:** front-end responsivo com Bootstrap 5 e FontAwesome.
 
 ## Tecnologias
 - **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter, openpyxl (planilhas) e segno (QR code).
 - **Servidor:** Gunicorn (com `ProxyFix` no Flask se estiver atrás de um proxy).
-- **Banco:** SQLite em volume local (`data/sgc.db`).
+- **Banco:** SQLite em volume local (`data/sgc.db`), em modo WAL (arquivos auxiliares `sgc.db-wal`/`sgc.db-shm` fazem parte do banco: não os apague com o servidor rodando).
 - **Frontend:** HTML5, CSS3, Bootstrap 5.3.2, Font Awesome 6.4.2 e Cropper.js 1.6.1 — servidos localmente a partir de `app/static/vendor/` (a interface funciona **sem acesso à internet**). Para atualizar uma biblioteca, substitua a pasta pela nova versão (o nome da pasta inclui a versão, o que permite cache longo no navegador) e ajuste os caminhos nos templates.
 - **Infra (opcional):** ficheiros Docker Compose e Nginx no repositório para quem preferir esse modelo de deploy.
 
@@ -102,6 +103,7 @@ bash start.sh      # inicia o servidor
 | `CARTEIRINHA_VALIDADE_MESES` | `12` | Validade impressa na carteirinha, a partir da emissão. |
 | `SGC_LOG_ACESSO` | `0` | `1` grava no `sgc.log` uma linha por requisição (desligado para o arquivo não crescer). |
 | `SGC_LOG_MAX_MB` / `SGC_LOG_MANTER` | `5` / `5` | Ao iniciar, um `sgc.log` maior que isto vira `sgc.log.1` (guarda até 5 arquivos). |
+| `BACKUP_SENHA` | *(vazio)* | Senha dos backups criptografados (tem prioridade sobre a definida na tela). |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
@@ -243,10 +245,22 @@ consistente do SQLite com o servidor em execução.
 ## Estrutura
 ```
 app/
-  main.py            Rotas e configuração do app
-  database.py        Modelos SQLAlchemy
-  restore_service.py Validação e aplicação de ZIP de restauração
-  migrations/        Alembic (Flask-Migrate)
+  main.py               Ponto de entrada (gunicorn main:app): importa os módulos de rotas
+  nucleo.py             App Flask, configuração, hooks, auditoria, PDFs e utilitários comuns
+  rotas_auth.py         Setup, login/logout, recuperação e troca de senha, perfil
+  rotas_associados.py   Painel, cadastro, busca, edição, listas e exportações
+  rotas_importacao.py   Importação em lote (XLSX/CSV)
+  rotas_carteirinha.py  Carteirinha em PDF e verificação pelo QR code
+  rotas_lgpd.py         Consentimento, dados do titular e anonimização
+  rotas_usuarios.py     Gestão de usuários e auditoria
+  rotas_backup.py       Backup e restauração pela interface
+  database.py           Modelos SQLAlchemy
+  backup_service.py     Geração e verificação dos ZIPs de backup (com criptografia)
+  backup_agendador.py   Backup automático em segundo plano
+  restore_service.py    Validação e aplicação de ZIP de restauração
+  importacao_service.py Leitura das planilhas de importação
+  planilha_service.py   Geração das planilhas de exportação
+  migrations/           Alembic (Flask-Migrate)
   templates/         Jinja2
   static/            CSS, JS e imagens (inclui uploads/fotos)
 data/                Banco SQLite, backups ZIP, restore_pending/ e segredo de sessão

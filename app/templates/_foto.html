@@ -1,0 +1,50 @@
+{# Campo de foto 3x4 com recorte no navegador (Cropper.js). JS em app.js (initRecorteFoto).
+   A página precisa carregar o Cropper: {{ recursos_cropper() }} no início do bloco content. #}
+
+{% macro recursos_cropper() -%}
+<link href="{{ url_for('static', filename='vendor/cropperjs-1.6.1/cropper.min.css') }}" rel="stylesheet"/>
+<script src="{{ url_for('static', filename='vendor/cropperjs-1.6.1/cropper.min.js') }}"></script>
+{%- endmacro %}
+
+{% macro campo_foto(foto_url='', foto_salva='', rotulo='Foto do Associado (3x4)', ajuda='A foto será aberta para você ajustar o enquadramento.') -%}
+{% set atual = foto_salva or foto_url %}
+<div class="row mb-4 bg-light p-3 rounded align-items-center" data-recorte-foto>
+    <div class="col-md-2 text-center">
+        <img data-foto-preview src="{{ atual }}" alt="Foto do associado"
+             class="img-thumbnail {% if not atual %}d-none{% endif %}"
+             style="width: 100px; height: 130px; object-fit: cover">
+        <div data-foto-vazia class="border rounded bg-white text-muted d-flex align-items-center justify-content-center {% if atual %}d-none{% endif %}"
+             style="width: 100px; height: 130px">Sem Foto</div>
+    </div>
+    <div class="col-md-10">
+        <label class="form-label fw-bold" for="input_foto"><i class="fa-solid fa-camera me-2"></i>{{ rotulo }}</label>
+        <input type="file" class="form-control" id="input_foto" name="foto_perfil" accept="image/png, image/jpeg" data-foto-arquivo>
+        <input type="hidden" name="foto_base64" value="{{ foto_salva }}" data-foto-base64>
+        <small class="text-muted">{{ ajuda }}</small>
+    </div>
+
+    <div class="modal fade" tabindex="-1" data-bs-backdrop="static" aria-hidden="true" data-foto-modal>
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title fw-bold" style="color: var(--agmeal-azul)">
+                        <i class="fa-solid fa-crop-simple me-2"></i>Ajustar Enquadramento 3x4
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body p-0" style="background-color: #333">
+                    <div style="max-height: 500px; display: flex; justify-content: center">
+                        <img src="" alt="" style="max-width: 100%; display: block" data-foto-recortar>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary-agmeal fw-bold" data-foto-confirmar>
+                        <i class="fa-solid fa-check me-2"></i>Confirmar Recorte
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{%- endmacro %}

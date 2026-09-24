@@ -29,6 +29,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Verificar estilo e erros (ruff)
+        run: |
+          pip install ruff==0.15.8
+          ruff check .
+
       - name: Executar testes
         run: |
           cd "${GITHUB_WORKSPACE}"

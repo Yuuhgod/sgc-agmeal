@@ -4,7 +4,10 @@ Flask-Migrate==4.1.0
 Flask-WTF==1.2.1
 Flask-Limiter==3.8.0
 WeasyPrint>=70,<71
+Pillow>=10
 openpyxl==3.1.5
 segno==1.6.6
+pyzipper==0.4.0
+pycryptodomex==3.23.0
 gunicorn==23.0.0
 pytest==9.0.3

@@ -1,12 +1,9 @@
 {% extends "base.html" %}
 {% from "_macros.html" import editor_dependentes %}
+{% from "_foto.html" import campo_foto, recursos_cropper %}
 {% block title %}SGC - Novo Cadastro{% endblock %}
 {% block content %}
-<link
-    href="{{ url_for('static', filename='vendor/cropperjs-1.6.1/cropper.min.css') }}"
-    rel="stylesheet"
-/>
-<script src="{{ url_for('static', filename='vendor/cropperjs-1.6.1/cropper.min.js') }}"></script>
+{{ recursos_cropper() }}
 
 <div class="card shadow-sm border-0">
     <div class="card-header card-header-agmeal">
@@ -15,47 +12,7 @@
     <div class="card-body">
         <form action="{{ url_for('cadastro') }}" method="POST" enctype="multipart/form-data" class="form-submit-loading" data-loading-label="Salvando…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            {% set foto_salva = request.form.get('foto_base64', '') %}
-
-            <div class="row mb-4 bg-light p-3 rounded align-items-center">
-                <div class="col-md-2 text-center">
-                    <img
-                        id="preview_foto"
-                        src="{{ foto_salva }}"
-                        class="img-thumbnail {% if not foto_salva %}d-none{% endif %}"
-                        style="width: 100px; height: 130px; object-fit: cover"
-                    />
-                    <div
-                        id="placeholder_foto"
-                        class="border rounded bg-white text-muted d-flex align-items-center justify-content-center {% if foto_salva %}d-none{% endif %}"
-                        style="width: 100px; height: 130px"
-                    >
-                        Sem Foto
-                    </div>
-                </div>
-                <div class="col-md-10">
-                    <label class="form-label fw-bold"
-                        ><i class="fa-solid fa-camera me-2"></i>Foto do
-                        Associado (3x4)</label
-                    >
-                    <input
-                        type="file"
-                        class="form-control"
-                        id="input_foto"
-                        accept="image/png, image/jpeg"
-                    />
-                    <input
-                        type="hidden"
-                        name="foto_base64"
-                        id="foto_base64"
-                        value="{{ foto_salva }}"
-                    />
-                    <small class="text-muted"
-                        >A foto será aberta para você ajustar o
-                        enquadramento.</small
-                    >
-                </div>
-            </div>
+            {{ campo_foto(foto_salva=request.form.get('foto_base64', '')) }}
 
             <div class="row">
                 <div class="col-md-6 mb-3">
@@ -214,122 +171,5 @@
     </div>
 </div>
 
-<div
-    class="modal fade"
-    id="modalCrop"
-    tabindex="-1"
-    data-bs-backdrop="static"
-    aria-hidden="true"
->
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header bg-light">
-                <h5
-                    class="modal-title fw-bold"
-                    style="color: var(--agmeal-azul)"
-                >
-                    <i class="fa-solid fa-crop-simple me-2"></i>Ajustar
-                    Enquadramento 3x4
-                </h5>
-                <button
-                    type="button"
-                    class="btn-close"
-                    data-bs-dismiss="modal"
-                    aria-label="Close"
-                ></button>
-            </div>
-            <div class="modal-body p-0" style="background-color: #333">
-                <div
-                    class="img-container"
-                    style="
-                        max-height: 500px;
-                        display: flex;
-                        justify-content: center;
-                    "
-                >
-                    <img
-                        id="image_to_crop"
-                        src=""
-                        style="max-width: 100%; display: block"
-                    />
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button
-                    type="button"
-                    class="btn btn-outline-secondary"
-                    data-bs-dismiss="modal"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-primary-agmeal fw-bold"
-                    id="btn_crop"
-                >
-                    <i class="fa-solid fa-check me-2"></i>Confirmar Recorte
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %} {% block scripts %}
-<script>
-    // --- LÓGICA DO CROPPER.JS ---
-    let cropper;
-    const inputFoto = document.getElementById("input_foto");
-    const imageToCrop = document.getElementById("image_to_crop");
-    const modalElement = document.getElementById("modalCrop");
-    const modalCrop = new bootstrap.Modal(modalElement);
-    const previewFoto = document.getElementById("preview_foto");
-    const placeholderFoto = document.getElementById("placeholder_foto");
-    const inputBase64 = document.getElementById("foto_base64");
-
-    inputFoto.addEventListener("change", function (e) {
-        const files = e.target.files;
-        if (files && files.length > 0) {
-            const reader = new FileReader();
-            reader.onload = function (event) {
-                imageToCrop.src = event.target.result;
-                modalCrop.show();
-            };
-            reader.readAsDataURL(files[0]);
-        }
-    });
-
-    modalElement.addEventListener("shown.bs.modal", function () {
-        cropper = new Cropper(imageToCrop, {
-            aspectRatio: 3 / 4,
-            viewMode: 2,
-            dragMode: "move",
-        });
-    });
-
-    modalElement.addEventListener("hidden.bs.modal", function () {
-        if (cropper) {
-            cropper.destroy();
-            cropper = null;
-        }
-        if (!inputBase64.value) {
-            inputFoto.value = "";
-        }
-    });
-
-    document.getElementById("btn_crop").addEventListener("click", function () {
-        const canvas = cropper.getCroppedCanvas({
-            width: 300,
-            height: 400,
-        });
-
-        const base64Data = canvas.toDataURL("image/jpeg", 0.9);
-
-        previewFoto.src = base64Data;
-        previewFoto.classList.remove("d-none");
-        placeholderFoto.classList.add("d-none");
-
-        inputBase64.value = base64Data;
-
-        modalCrop.hide();
-    });
-</script>
 {% endblock %}
+

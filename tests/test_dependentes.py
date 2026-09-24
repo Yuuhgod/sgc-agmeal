@@ -118,11 +118,11 @@ def test_planilha_xlsx_tem_aba_de_dependentes(admin_client):
     principal = {c.value: i for i, c in enumerate(wb['Associados'][1])}
     assert wb['Associados'][2][principal['Dependentes']].value == 'Dep A (Filho(a)); Dep B (Cônjuge)'
     linhas = [[c.value for c in row] for row in wb['Dependentes'].iter_rows(min_row=2)]
-    assert [(l[1], l[2], l[3]) for l in linhas] == [(nome, 'Dep A', 'Filho(a)'), (nome, 'Dep B', 'Cônjuge')]
+    assert [(lin[1], lin[2], lin[3]) for lin in linhas] == [(nome, 'Dep A', 'Filho(a)'), (nome, 'Dep B', 'Cônjuge')]
 
 
 def test_conversao_do_texto_antigo_roda_uma_vez(admin_client, flask_app):
-    import main
+    import nucleo
 
     dados = _novo()
     admin_client.post('/cadastro', data=dados)
@@ -135,8 +135,8 @@ def test_conversao_do_texto_antigo_roda_uma_vez(admin_client, flask_app):
         with db.engine.begin() as conn:
             conn.execute(text("DELETE FROM sgc_meta WHERE chave = 'dependentes_convertidos'"))
 
-        main._converter_dependentes_legados()
-        main._converter_dependentes_legados()  # segunda vez não duplica
+        nucleo._converter_dependentes_legados()
+        nucleo._converter_dependentes_legados()  # segunda vez não duplica
         db.session.expire_all()
 
         deps = db.session.get(Associado, aid).dependentes

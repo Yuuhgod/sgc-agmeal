@@ -60,16 +60,16 @@ def test_auditoria_filtra_usuario_sem_acento(admin_client):
 
 def test_pdfs_nao_buscam_recursos_por_http(admin_client, joao, monkeypatch):
     """O logo era buscado em http://<servidor>/static/..., travando o worker (≈10 s e sem logo)."""
-    import main
+    import nucleo
 
     buscados = []
-    original = main._BuscadorRecursosPDF.fetch
+    original = nucleo._BuscadorRecursosPDF.fetch
 
     def espiar(self, url, headers=None):
         buscados.append(url)
         return original(self, url, headers)
 
-    monkeypatch.setattr(main._BuscadorRecursosPDF, 'fetch', espiar)
+    monkeypatch.setattr(nucleo._BuscadorRecursosPDF, 'fetch', espiar)
     _, sufixo = joao
     for r in (
         admin_client.post('/exportar_lista_simples'),
@@ -89,16 +89,16 @@ def test_pdfs_nao_buscam_recursos_por_http(admin_client, joao, monkeypatch):
     'file:///etc/passwd',
 ])
 def test_buscador_recusa_http_e_arquivos_fora_das_pastas(url):
-    import main
+    import nucleo
 
-    with pytest.raises(Exception):
-        main._BuscadorRecursosPDF().fetch(url)
+    with pytest.raises(ValueError):
+        nucleo._BuscadorRecursosPDF().fetch(url)
 
 
 def test_buscador_aceita_logo_local():
-    import main
+    import nucleo
 
-    resposta = main._BuscadorRecursosPDF().fetch(main.LOGO_PDF_URI)
+    resposta = nucleo._BuscadorRecursosPDF().fetch(nucleo.LOGO_PDF_URI)
     try:
         conteudo = resposta.read() if hasattr(resposta, 'read') else b''
     finally:

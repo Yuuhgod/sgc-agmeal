@@ -5,7 +5,6 @@ from __future__ import annotations
 import random
 import uuid
 
-import pytest
 
 from database import (
     ACAO_AUTH_RECUPERACAO,
@@ -23,26 +22,6 @@ from tests.test_crud_associados import _payload_cadastro
 
 def _ip_aleatorio():
     return f'10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}'
-
-
-@pytest.fixture
-def usuario_comum(flask_app, admin_credentials):
-    """Cria um usuário com perfil comum e remove-o no fim do teste."""
-    nome = f'user_{uuid.uuid4().hex[:8]}'
-    senha = 'senha_comum_123'
-    with flask_app.app_context():
-        u = Usuario(username=nome, role=ROLE_USUARIO)
-        u.set_senha(senha)
-        u.set_palavra_recuperacao('frase comum')
-        db.session.add(u)
-        db.session.commit()
-        uid = u.id
-    yield {'id': uid, 'username': nome, 'senha': senha}
-    with flask_app.app_context():
-        u = db.session.get(Usuario, uid)
-        if u:
-            db.session.delete(u)
-            db.session.commit()
 
 
 def _login(client, credenciais):
@@ -89,7 +68,7 @@ def test_admin_rebaixado_perde_acesso_admin(client, flask_app, usuario_comum):
 # --- Recuperação de senha ---------------------------------------------------------------
 
 def test_recuperacao_bloqueia_apos_falhas(client, flask_app, usuario_comum):
-    import main
+    import nucleo
 
     ip = _ip_aleatorio()
     dados_errados = {
@@ -97,12 +76,12 @@ def test_recuperacao_bloqueia_apos_falhas(client, flask_app, usuario_comum):
         'palavra_recuperacao': 'frase errada',
         'nova_senha': 'nova_senha_123',
     }
-    for _ in range(main.LOGIN_MAX_FALHAS_IP):
+    for _ in range(nucleo.LOGIN_MAX_FALHAS_IP):
         client.post('/esqueci_senha', data=dados_errados, environ_base={'REMOTE_ADDR': ip})
 
     with flask_app.app_context():
         falhas = Auditoria.query.filter_by(acao=ACAO_AUTH_RECUPERACAO_FALHOU, ip_origem=ip).count()
-        assert falhas == main.LOGIN_MAX_FALHAS_IP
+        assert falhas == nucleo.LOGIN_MAX_FALHAS_IP
 
     # Mesmo com a frase correta, o IP está bloqueado.
     r = client.post(

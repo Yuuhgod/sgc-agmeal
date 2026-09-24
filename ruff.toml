@@ -1,0 +1,13 @@
+# Verificação de estilo/erros (roda no CI). Linhas longas não são exigidas neste projeto.
+target-version = "py311"
+# Pastas com módulos do projeto (para agrupar os imports locais separadamente).
+src = ["app", "."]
+extend-exclude = ["app/migrations"]
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# test_app.py ajusta o sys.path antes de importar o app (roda como script, fora do pytest).
+"test_app.py" = ["E402"]

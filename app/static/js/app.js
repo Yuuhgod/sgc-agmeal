@@ -132,11 +132,64 @@
         }, true);
     }
 
+    /**
+     * Campo de foto com recorte 3x4 (`[data-recorte-foto]`, macro campo_foto em _foto.html).
+     * O recorte (300x400 JPEG) vai em foto_base64; o arquivo original não é enviado.
+     */
+    function initRecorteFoto() {
+        if (typeof Cropper === "undefined" || typeof bootstrap === "undefined") return;
+        document.querySelectorAll("[data-recorte-foto]").forEach(function (campo) {
+            var arquivo = campo.querySelector("[data-foto-arquivo]");
+            var base64 = campo.querySelector("[data-foto-base64]");
+            var preview = campo.querySelector("[data-foto-preview]");
+            var vazia = campo.querySelector("[data-foto-vazia]");
+            var modalEl = campo.querySelector("[data-foto-modal]");
+            var imagem = campo.querySelector("[data-foto-recortar]");
+            var modal = new bootstrap.Modal(modalEl);
+            var cropper = null;
+            var confirmado = false;
+
+            // Com JavaScript, só o recorte é enviado (o original pode ter vários MB).
+            arquivo.removeAttribute("name");
+
+            arquivo.addEventListener("change", function () {
+                if (!arquivo.files || !arquivo.files.length) return;
+                var leitor = new FileReader();
+                leitor.onload = function (ev) {
+                    imagem.src = ev.target.result;
+                    confirmado = false;
+                    modal.show();
+                };
+                leitor.readAsDataURL(arquivo.files[0]);
+            });
+            modalEl.addEventListener("shown.bs.modal", function () {
+                cropper = new Cropper(imagem, { aspectRatio: 3 / 4, viewMode: 2, dragMode: "move" });
+            });
+            modalEl.addEventListener("hidden.bs.modal", function () {
+                if (cropper) {
+                    cropper.destroy();
+                    cropper = null;
+                }
+                if (!confirmado) arquivo.value = "";
+            });
+            campo.querySelector("[data-foto-confirmar]").addEventListener("click", function () {
+                var dados = cropper.getCroppedCanvas({ width: 300, height: 400 }).toDataURL("image/jpeg", 0.9);
+                preview.src = dados;
+                preview.classList.remove("d-none");
+                vazia.classList.add("d-none");
+                base64.value = dados;
+                confirmado = true;
+                modal.hide();
+            });
+        });
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         autoFecharAlertas();
         initFormSubmitLoading();
         initPdfLinkLoading();
         initEditorDependentes();
         initConfirmacoes();
+        initRecorteFoto();
     });
 })();

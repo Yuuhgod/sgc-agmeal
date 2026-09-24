@@ -38,6 +38,12 @@
             </div>
 
             <div class="mb-3">
+                <label for="senha_backup" class="form-label fw-bold">Senha do backup <span class="fw-normal text-muted">(se o ZIP for protegido)</span></label>
+                <input class="form-control" type="password" name="senha_backup" id="senha_backup" autocomplete="off">
+                <div class="form-text">Deixe em branco para usar a senha dos backups salva neste servidor.</div>
+            </div>
+
+            <div class="mb-3">
                 <label for="confirmar_texto" class="form-label fw-bold">Confirmação por texto</label>
                 <input class="form-control font-monospace" type="text" name="confirmar_texto" id="confirmar_texto"
                        autocomplete="off" placeholder="{{ confirm_phrase }}" required>

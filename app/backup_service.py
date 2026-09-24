@@ -23,6 +23,8 @@ import tempfile
 import zipfile
 from datetime import datetime
 
+import pyzipper
+
 _PREFIX = 'sgc_agmeal_backup_'
 _NAME_RE = re.compile(r'^' + re.escape(_PREFIX) + r'\d{8}_\d{6}\.zip$')
 
@@ -31,21 +33,40 @@ def _sqlite_backup_to_file(src_db: str, dst_path: str, log: logging.Logger) -> N
     """Cópia consistente do SQLite (evita copiar o arquivo .db com o app escrevendo)."""
     if not os.path.isfile(src_db):
         raise FileNotFoundError(f'Banco não encontrado: {src_db}')
-    src = sqlite3.connect(f'file:{src_db}?mode=ro', uri=True, timeout=60.0)
+    # Conexão normal (não mode=ro): um banco em WAL sem os arquivos -wal/-shm (servidor
+    # parado) não abre em modo somente leitura.
+    src = sqlite3.connect(src_db, timeout=60.0)
     dst = sqlite3.connect(dst_path)
     try:
         src.backup(dst)
+        # A cópia vai sozinha para o ZIP: volta ao modo de journal tradicional para abrir
+        # sem arquivos auxiliares (o app religa o WAL ao usar o banco restaurado).
+        dst.execute('PRAGMA journal_mode=DELETE')
     finally:
         dst.close()
         src.close()
 
 
-def verificar_backup_zip(zip_path: str) -> None:
+def zip_criptografado(zip_path: str) -> bool:
+    """True se algum arquivo do ZIP estiver protegido por senha."""
+    with zipfile.ZipFile(zip_path) as zf:
+        return any(info.flag_bits & 0x1 for info in zf.infolist())
+
+
+def abrir_zip(zip_path: str, senha: str | None = None):
+    """Abre ZIP comum ou AES (WinZip). A senha só é usada se o ZIP for protegido."""
+    zf = pyzipper.AESZipFile(zip_path)
+    if senha:
+        zf.setpassword(senha.encode('utf-8'))
+    return zf
+
+
+def verificar_backup_zip(zip_path: str, senha: str | None = None) -> None:
     """Confere se o ZIP está íntegro e se o banco dentro dele abre sem corrupção.
 
     Levanta ValueError com a causa se algo estiver errado."""
     try:
-        with zipfile.ZipFile(zip_path) as zf:
+        with abrir_zip(zip_path, senha) as zf:
             ruim = zf.testzip()
             if ruim:
                 raise ValueError(f'Arquivo corrompido dentro do ZIP: {ruim}')
@@ -59,8 +80,10 @@ def verificar_backup_zip(zip_path: str) -> None:
                     tabelas = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 finally:
                     conn.close()
-    except zipfile.BadZipFile as exc:
+    except (zipfile.BadZipFile, pyzipper.BadZipFile) as exc:
         raise ValueError(f'ZIP inválido: {exc}') from exc
+    except RuntimeError as exc:  # senha ausente ou errada
+        raise ValueError(f'Não foi possível abrir o backup protegido: {exc}') from exc
     except sqlite3.DatabaseError as exc:
         raise ValueError(f'Banco do backup não abre: {exc}') from exc
     if resultado != 'ok':
@@ -124,10 +147,13 @@ def criar_backup_zip(
     keep_local: int,
     keep_sync: int,
     log: logging.Logger,
+    senha: str | None = None,
 ) -> dict:
     """
+    Com `senha`, o ZIP é criptografado com AES-256 (padrão WinZip: abre no 7-Zip).
+
     Retorna dict com:
-      zip_path, zip_filename, size_bytes, sync_path (ou None), had_db, had_secret
+      zip_path, zip_filename, size_bytes, sync_path (ou None), had_db, had_secret, criptografado
     """
     os.makedirs(backups_dir, mode=0o700, exist_ok=True)
 
@@ -143,7 +169,13 @@ def criar_backup_zip(
 
     tmp_db: str | None = None
     try:
-        with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        if senha:
+            zf_ctx = pyzipper.AESZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED,
+                                         encryption=pyzipper.WZ_AES)
+            zf_ctx.setpassword(senha.encode('utf-8'))
+        else:
+            zf_ctx = zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED)
+        with zf_ctx as zf:
             if had_db:
                 with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
                     tmp_db = tmp.name
@@ -178,7 +210,7 @@ def criar_backup_zip(
 
         # Um backup que não restaura não é backup: verifica antes de contar como válido.
         try:
-            verificar_backup_zip(zip_path)
+            verificar_backup_zip(zip_path, senha)
         except ValueError:
             os.remove(zip_path)
             raise
@@ -214,6 +246,7 @@ def criar_backup_zip(
         'sync_path': sync_path,
         'had_db': had_db,
         'had_secret': had_secret,
+        'criptografado': bool(senha),
     }
 
 
