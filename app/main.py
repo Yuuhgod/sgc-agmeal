@@ -58,6 +58,7 @@ from database import (
     ACAO_AUTH_RECUPERACAO,
     ACAO_AUTH_RECUPERACAO_FALHOU,
     ACAO_SISTEMA_BACKUP,
+    ACAO_SISTEMA_BACKUP_SENHA,
     ACAO_SISTEMA_RESTORE,
     ACAO_USUARIO_CRIAR,
     ACAO_USUARIO_EDITAR,
@@ -263,7 +264,7 @@ import backup_agendador
 from backup_service import criar_backup_zip, listar_backups_locais
 from importacao_service import PlanilhaInvalida, gerar_modelo_xlsx, ler_planilha, separar_dependentes
 from planilha_service import gerar_csv, gerar_xlsx
-from restore_service import aplicar_restauracao, extrair_zip_seguro
+from restore_service import SenhaBackupNecessaria, aplicar_restauracao, extrair_zip_seguro
 
 migrate = Migrate(app, db)
 
@@ -301,6 +302,38 @@ BACKUP_AUTO_INTERVALO_HORAS = _env_float('BACKUP_AUTO_INTERVALO_HORAS', '24', 1)
 BACKUP_ALERTA_DIAS = _env_float('BACKUP_ALERTA_DIAS', '3', 1)
 
 
+BACKUP_SENHA_MIN = 10
+
+
+def _arquivo_senha_backup():
+    return os.path.join(data_dir, '.backup_senha')
+
+
+def _senha_backup():
+    """Senha dos backups: BACKUP_SENHA no ambiente ou a definida pelo admin (data/.backup_senha).
+    O arquivo nunca entra no ZIP (o backup só leva sgc.db, .flask_secret e fotos)."""
+    env = os.environ.get('BACKUP_SENHA', '').strip()
+    if env:
+        return env
+    try:
+        with open(_arquivo_senha_backup(), encoding='utf-8') as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def _gravar_senha_backup(senha):
+    caminho = _arquivo_senha_backup()
+    tmp = caminho + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as fh:
+        fh.write(senha)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, caminho)
+
+
 def _executar_backup_automatico():
     info = criar_backup_zip(
         data_dir=data_dir,
@@ -310,6 +343,7 @@ def _executar_backup_automatico():
         keep_local=_backup_keep_local(),
         keep_sync=_backup_keep_sync(),
         log=app.logger,
+        senha=_senha_backup(),
     )
     # Fora de uma requisição: grava a auditoria direto (sem sessão/IP).
     db.session.add(Auditoria(
@@ -337,6 +371,9 @@ def _situacao_backup():
         'falhou': falhou,
         'alerta': falhou or idade is None or idade > BACKUP_ALERTA_DIAS * 24,
         'automatico': BACKUP_AUTO,
+        'criptografado': bool(_senha_backup()),
+        'senha_via_ambiente': bool(os.environ.get('BACKUP_SENHA', '').strip()),
+        'nuvem': bool(_backup_sync_dir()),
         'intervalo_horas': BACKUP_AUTO_INTERVALO_HORAS,
         'alerta_dias': BACKUP_ALERTA_DIAS,
     }
@@ -2475,6 +2512,42 @@ def admin_backup():
     )
 
 
+@app.route('/admin/backup/senha', methods=['POST'])
+@admin_required
+def admin_backup_senha():
+    """Define ou troca a senha dos backups (exige a senha de login do admin)."""
+    admin = db.session.get(Usuario, session['usuario_id'])
+    if not admin.check_senha(request.form.get('senha_login', '')):
+        flash('Sua senha de login está incorreta. Nada foi alterado.', 'danger')
+        return redirect(url_for('admin_backup'))
+    if os.environ.get('BACKUP_SENHA', '').strip():
+        flash('A senha dos backups está definida no ambiente do servidor (BACKUP_SENHA) e não pode ser trocada por aqui.', 'warning')
+        return redirect(url_for('admin_backup'))
+
+    nova = request.form.get('nova_senha_backup', '')
+    if len(nova) < BACKUP_SENHA_MIN:
+        flash(f'A senha dos backups deve ter pelo menos {BACKUP_SENHA_MIN} caracteres.', 'danger')
+        return redirect(url_for('admin_backup'))
+    if nova != request.form.get('confirmacao_senha_backup', ''):
+        flash('A confirmação não confere com a nova senha dos backups.', 'danger')
+        return redirect(url_for('admin_backup'))
+
+    tinha = bool(_senha_backup())
+    _gravar_senha_backup(nova)
+    registrar_auditoria(
+        ACAO_SISTEMA_BACKUP_SENHA,
+        entidade='backup',
+        descricao='Senha dos backups ' + ('alterada' if tinha else 'definida'),
+        commit=True,
+    )
+    flash(
+        'Senha dos backups salva. Os próximos backups serão criptografados. ANOTE a senha em local seguro: '
+        'sem ela não é possível restaurar os backups em outro computador.',
+        'success',
+    )
+    return redirect(url_for('admin_backup'))
+
+
 @app.route('/admin/backup/gerar', methods=['POST'])
 @admin_required
 @limiter.limit('12 per hour')
@@ -2498,6 +2571,7 @@ def admin_backup_gerar():
             keep_local=_backup_keep_local(),
             keep_sync=_backup_keep_sync(),
             log=current_app.logger,
+            senha=_senha_backup(),
         )
     except Exception as exc:
         current_app.logger.exception('Falha ao gerar backup')
@@ -2582,7 +2656,10 @@ def admin_restore():
 
     try:
         with tempfile.TemporaryDirectory(dir=restore_pending_dir) as extract_root:
-            extrair_zip_seguro(zip_path, extract_root, current_app.logger)
+            extrair_zip_seguro(
+                zip_path, extract_root, current_app.logger,
+                senhas=(request.form.get('senha_backup', ''), _senha_backup()),
+            )
 
             try:
                 criar_backup_zip(
@@ -2593,6 +2670,7 @@ def admin_restore():
                     keep_local=_backup_keep_local(),
                     keep_sync=_backup_keep_sync(),
                     log=current_app.logger,
+                    senha=_senha_backup(),
                 )
             except Exception:
                 current_app.logger.exception('Falha no backup de segurança antes da restauração')
@@ -2641,6 +2719,9 @@ def admin_restore():
                 commit=True,
             )
 
+    except SenhaBackupNecessaria as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('admin_restore'))
     except ValueError as exc:
         current_app.logger.warning('ZIP de restauração rejeitado: %s', exc)
         flash(str(exc), 'danger')

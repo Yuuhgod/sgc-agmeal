@@ -199,6 +199,7 @@ ACAO_ASSOCIADO_DADOS_TITULAR = 'associado.dados_titular'
 ACAO_ASSOCIADO_ANONIMIZAR = 'associado.anonimizar'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
 ACAO_SISTEMA_RESTORE = 'sistema.restore'
+ACAO_SISTEMA_BACKUP_SENHA = 'sistema.backup_senha'
 
 ACOES_ROTULOS = {
     ACAO_ASSOCIADO_CRIAR: 'Cadastrou associado',
@@ -224,6 +225,7 @@ ACOES_ROTULOS = {
     ACAO_ASSOCIADO_ANONIMIZAR: 'Anonimizou associado (LGPD)',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
     ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
+    ACAO_SISTEMA_BACKUP_SENHA: 'Definiu/alterou a senha dos backups',
 }
 
 

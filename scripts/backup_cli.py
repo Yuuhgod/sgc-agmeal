@@ -63,6 +63,7 @@ def cli_main() -> int:
             keep_local=_backup_keep_local(),
             keep_sync=_backup_keep_sync(),
             log=application.logger,
+            senha=main_mod._senha_backup(),
         )
         application.logger.info(
             'Backup agendado concluído: %s (%s bytes) sync=%s',

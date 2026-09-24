@@ -60,6 +60,50 @@
             </p>
         </div>
 
+        <div class="card border-0 {{ 'bg-light' if situacao.criptografado else 'border-warning border' }} mb-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2"><i class="fa-solid fa-lock me-2"></i>Criptografia dos backups:
+                    {% if situacao.criptografado %}<span class="text-success">ligada</span>{% else %}<span class="text-danger">desligada</span>{% endif %}
+                </h6>
+                {% if situacao.criptografado %}
+                <p class="small mb-2">Os backups são ZIPs protegidos por senha (AES-256). Para abrir um backup fora do sistema,
+                    use o <strong>7-Zip</strong> com a senha (o "Extrair" do Windows não abre ZIP com AES).</p>
+                {% else %}
+                <p class="small mb-2">Os backups contêm todos os dados pessoais dos associados e a chave de segurança do sistema.
+                    {% if situacao.nuvem %}<strong class="text-danger">Eles estão sendo copiados para a nuvem sem proteção.</strong>{% endif %}
+                    Defina uma senha para criptografá-los.</p>
+                {% endif %}
+                {% if situacao.senha_via_ambiente %}
+                <p class="small text-muted mb-0">Senha definida no ambiente do servidor (<code>BACKUP_SENHA</code>).</p>
+                {% else %}
+                <details {% if not situacao.criptografado %}open{% endif %}>
+                    <summary class="small fw-semibold">{{ 'Trocar a senha dos backups' if situacao.criptografado else 'Definir a senha dos backups' }}</summary>
+                    <form action="{{ url_for('admin_backup_senha') }}" method="POST" class="mt-2" autocomplete="off">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold" for="nova_senha_backup">Nova senha (mín. 10 caracteres)</label>
+                                <input type="password" class="form-control form-control-sm" name="nova_senha_backup" id="nova_senha_backup" minlength="10" required autocomplete="new-password">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold" for="confirmacao_senha_backup">Confirmar</label>
+                                <input type="password" class="form-control form-control-sm" name="confirmacao_senha_backup" id="confirmacao_senha_backup" minlength="10" required autocomplete="new-password">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold" for="senha_login">Sua senha de login</label>
+                                <input type="password" class="form-control form-control-sm" name="senha_login" id="senha_login" required autocomplete="current-password">
+                            </div>
+                        </div>
+                        <p class="small text-danger mt-2 mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>
+                            Anote a senha em local seguro, fora deste computador. Sem ela, os backups criptografados não podem ser restaurados em outra máquina.
+                            {% if situacao.criptografado %}Backups antigos continuam abrindo só com a senha antiga.{% endif %}</p>
+                        <button type="submit" class="btn btn-sm btn-primary-agmeal fw-bold">Salvar senha</button>
+                    </form>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+
         <form action="{{ url_for('admin_backup_gerar') }}" method="POST" class="mt-4 form-submit-loading" data-loading-label="Gerando backup…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             {% if sync_dir %}

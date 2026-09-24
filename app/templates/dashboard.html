@@ -10,6 +10,16 @@
     </div>
 </div>
 
+{% if situacao_backup and situacao_backup.nuvem and not situacao_backup.criptografado %}
+<div class="alert alert-danger d-flex align-items-start gap-3 no-auto-close" role="alert">
+    <i class="fa-solid fa-lock-open fa-lg mt-1"></i>
+    <div class="flex-grow-1">
+        <strong>Os backups estão indo para a nuvem sem senha.</strong>
+        <span class="d-block small">Eles contêm os dados pessoais de todos os associados. Defina uma senha para criptografá-los.</span>
+    </div>
+    <a href="{{ url_for('admin_backup') }}" class="btn btn-sm btn-dark">Definir senha</a>
+</div>
+{% endif %}
 {% if situacao_backup and situacao_backup.alerta %}
 <div class="alert alert-warning d-flex align-items-start gap-3 no-auto-close" role="alert">
     <i class="fa-solid fa-triangle-exclamation fa-lg mt-1"></i>

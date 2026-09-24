@@ -23,6 +23,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup automático:** o próprio servidor gera um backup sempre que o último tiver mais de `BACKUP_AUTO_INTERVALO_HORAS` (padrão 24h). Verifica a cada 10 minutos, então um PC desligado à noite faz o backup logo depois de ligado. Só um processo do Gunicorn roda o agendador (lock de arquivo em `data/`). Todo backup, manual ou automático, é verificado (ZIP íntegro e banco sem corrupção) antes de ser guardado. O painel alerta os admins quando o último backup passa de `BACKUP_ALERTA_DIAS` ou quando a última tentativa falhou.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
+- **Backups criptografados:** com uma senha definida pelo admin na tela de backup (ou `BACKUP_SENHA` no ambiente), todo backup vira um ZIP **AES-256** — abre no **7-Zip** com a senha (o "Extrair" do Windows não abre AES). A senha fica em `data/.backup_senha` (fora do ZIP). **Anote-a em local seguro:** sem ela não há como restaurar o backup em outro computador. O painel alerta se os backups vão para a nuvem sem senha.
 - **Restaurar (admin):** upload de ZIP com confirmações explícitas (texto + caixa) e backup de segurança automático antes de substituir dados; ver secção *Restauração* abaixo.
 - **Interface:** front-end responsivo com Bootstrap 5 e FontAwesome.
 
@@ -102,6 +103,7 @@ bash start.sh      # inicia o servidor
 | `CARTEIRINHA_VALIDADE_MESES` | `12` | Validade impressa na carteirinha, a partir da emissão. |
 | `SGC_LOG_ACESSO` | `0` | `1` grava no `sgc.log` uma linha por requisição (desligado para o arquivo não crescer). |
 | `SGC_LOG_MAX_MB` / `SGC_LOG_MANTER` | `5` / `5` | Ao iniciar, um `sgc.log` maior que isto vira `sgc.log.1` (guarda até 5 arquivos). |
+| `BACKUP_SENHA` | *(vazio)* | Senha dos backups criptografados (tem prioridade sobre a definida na tela). |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
