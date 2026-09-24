@@ -34,7 +34,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 import segno
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFError, CSRFProtect
 from sqlalchemy import extract, inspect, text
 from sqlalchemy.orm import selectinload
 from weasyprint import HTML
@@ -569,7 +569,7 @@ def iniciar_agendador_backup():
 
 @app.before_request
 def verificar_primeiro_acesso():
-    if request.endpoint in ['setup', 'static']:
+    if request.endpoint in ['setup', 'static', 'saude']:
         return
     if Usuario.query.count() == 0:
         return redirect(url_for('setup'))
@@ -658,6 +658,58 @@ def add_header(response):
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
     return response
+
+
+# ---------------------------------------------------------------------------------------
+# Páginas de erro e verificação de saúde
+# ---------------------------------------------------------------------------------------
+
+ERROS = {
+    400: ('fa-circle-exclamation', 'Requisição inválida', 'O pedido não pôde ser processado. Volte e tente novamente.'),
+    403: ('fa-lock', 'Acesso negado', 'Você não tem permissão para acessar esta página.'),
+    404: ('fa-magnifying-glass', 'Página não encontrada', 'O endereço não existe ou o registro foi removido.'),
+    405: ('fa-ban', 'Operação não permitida', 'Esta página não aceita este tipo de acesso.'),
+    413: ('fa-file-circle-exclamation', 'Arquivo grande demais',
+          'O arquivo enviado passa do limite aceito pelo sistema. Reduza o tamanho e tente de novo.'),
+    429: ('fa-hourglass-half', 'Muitas tentativas', 'Aguarde alguns minutos antes de tentar novamente.'),
+    500: ('fa-triangle-exclamation', 'Erro interno',
+          'Algo deu errado do nosso lado. O problema foi registrado no log; tente novamente em instantes.'),
+}
+
+
+def _pagina_erro(codigo, mensagem=None):
+    icone, titulo, padrao = ERROS.get(codigo, ERROS[500])
+    return render_template('erro.html', codigo=codigo, icone=icone, titulo=titulo,
+                           mensagem=mensagem or padrao), codigo
+
+
+@app.errorhandler(CSRFError)
+def erro_csrf(_exc):
+    return _pagina_erro(400, 'O formulário expirou (a página ficou aberta por muito tempo). '
+                             'Volte, recarregue a página e envie de novo.')
+
+
+for _codigo in (400, 403, 404, 405, 413, 429):
+    app.register_error_handler(_codigo, lambda exc, _c=_codigo: _pagina_erro(_c))
+
+
+@app.errorhandler(500)
+def erro_interno(_exc):
+    db.session.rollback()
+    return _pagina_erro(500)
+
+
+@app.route('/saude')
+@limiter.exempt
+def saude():
+    """Verificação para monitoramento: responde 200 se o app e o banco estão funcionando.
+    Não expõe detalhes (é acessível sem login)."""
+    try:
+        db.session.execute(text('SELECT 1'))
+        return {'status': 'ok'}, 200
+    except Exception:  # noqa: BLE001
+        app.logger.exception('Verificação de saúde: banco indisponível')
+        return {'status': 'erro'}, 503
 
 
 def login_required(f):
