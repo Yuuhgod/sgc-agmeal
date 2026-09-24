@@ -82,10 +82,12 @@
                             <div class="btn-group" role="group">
                                 <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
                                 <a href="{{ url_for('exportar_ficha', matricula=pessoa.matricula) }}" target="_blank" class="btn btn-sm btn-outline-secondary pdf-link-loading" data-loading-label="PDF…" title="Gerar ficha PDF (pode demorar alguns segundos)"><i class="fa-solid fa-file-pdf"></i></a>
+                                {% if sessao_is_admin %}
                                 <form action="{{ url_for('excluir', id=pessoa.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-sm btn-danger" title="Excluir"><i class="fa-solid fa-trash"></i></button>
                                 </form>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>

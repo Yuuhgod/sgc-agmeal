@@ -38,6 +38,8 @@ from database import (
     ACAO_AUTH_LOGIN,
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
+    ACAO_AUTH_RECUPERACAO,
+    ACAO_AUTH_RECUPERACAO_FALHOU,
     ACAO_SISTEMA_BACKUP,
     ACAO_SISTEMA_RESTORE,
     ACAO_USUARIO_CRIAR,
@@ -234,6 +236,14 @@ def _exportar_pdf_max_sem_filtro() -> int:
         return 400
 
 
+def _exportar_lista_simples_max() -> int:
+    """Máximo de linhas na «lista simples» em PDF (só texto, bem mais leve que as fichas)."""
+    try:
+        return max(1, int(os.environ.get('EXPORTAR_LISTA_SIMPLES_MAX', '5000')))
+    except ValueError:
+        return 5000
+
+
 
 def _garantir_coluna_role():
     """Mini-migração idempotente: adiciona 'role' em bancos antigos e define usuários
@@ -300,6 +310,28 @@ def verificar_primeiro_acesso():
         return
     if Usuario.query.count() == 0:
         return redirect(url_for('setup'))
+
+
+@app.before_request
+def sincronizar_sessao_com_banco():
+    """Revalida a sessão a cada requisição: se o usuário foi excluído, encerra a sessão;
+    caso contrário, atualiza papel e nome a partir do banco (um admin rebaixado perde o
+    acesso administrativo imediatamente, sem esperar a sessão expirar)."""
+    if request.endpoint == 'static' and not request.path.startswith('/static/uploads/'):
+        return
+    usuario_id = session.get('usuario_id')
+    if usuario_id is None:
+        return
+    usuario = db.session.get(Usuario, usuario_id)
+    if usuario is None:
+        session.clear()
+        flash('Sua sessão foi encerrada porque o usuário não existe mais.', 'warning')
+        return redirect(url_for('login'))
+    # Só grava se mudou, para não reenviar o cookie de sessão em toda resposta.
+    if session.get('role') != usuario.role:
+        session['role'] = usuario.role
+    if session.get('username') != usuario.username:
+        session['username'] = usuario.username
 
 
 @app.before_request
@@ -412,8 +444,8 @@ def registrar_auditoria(
         app.logger.exception('Falha ao registrar auditoria (acao=%s)', acao)
 
 
-def _login_bloqueado_por_ip(ip):
-    """True se este IP excedeu o limite de falhas de login na janela recente.
+def _ip_bloqueado(ip, acao_falha):
+    """True se este IP excedeu o limite de falhas (`acao_falha`) na janela recente.
 
     Usa a trilha de auditoria como armazenamento partilhado entre workers, garantindo
     proteção contra força bruta mesmo na instalação padrão (sem Nginx)."""
@@ -421,11 +453,19 @@ def _login_bloqueado_por_ip(ip):
         return False
     desde = datetime.now() - timedelta(minutes=LOGIN_JANELA_MINUTOS)
     falhas = Auditoria.query.filter(
-        Auditoria.acao == ACAO_AUTH_LOGIN_FALHOU,
+        Auditoria.acao == acao_falha,
         Auditoria.ip_origem == ip,
         Auditoria.data_hora >= desde,
     ).count()
     return falhas >= LOGIN_MAX_FALHAS_IP
+
+
+def _login_bloqueado_por_ip(ip):
+    return _ip_bloqueado(ip, ACAO_AUTH_LOGIN_FALHOU)
+
+
+def _recuperacao_bloqueada_por_ip(ip):
+    return _ip_bloqueado(ip, ACAO_AUTH_RECUPERACAO_FALHOU)
 
 
 @app.route('/setup', methods=['GET', 'POST'])
@@ -436,7 +476,11 @@ def setup():
     if request.method == 'POST':
         username = request.form['username'].strip()
         senha = request.form['senha']
-        palavra = request.form['palavra_recuperacao']
+        palavra = request.form['palavra_recuperacao'].strip()
+
+        if not username or not palavra:
+            flash('Usuário e frase de segurança são obrigatórios.', 'danger')
+            return render_template('setup.html')
 
         if len(senha) < 8:
             flash('A senha deve ter no mínimo 8 caracteres.', 'danger')
@@ -537,21 +581,54 @@ def esqueci_senha():
             flash('A nova senha deve ter no mínimo 8 caracteres.', 'danger')
             return render_template('esqueci_senha.html')
 
+        if _recuperacao_bloqueada_por_ip(request.remote_addr):
+            app.logger.warning(
+                'Recuperação bloqueada por excesso de tentativas: ip=%s usuario=%s',
+                request.remote_addr, username,
+            )
+            flash(
+                'Muitas tentativas de recuperação malsucedidas deste computador. '
+                'Aguarde alguns minutos e tente novamente.',
+                'danger',
+            )
+            return render_template('esqueci_senha.html')
+
         usuario = Usuario.query.filter_by(username=username).first()
 
-        if usuario and usuario.verificar_palavra_recuperacao(palavra):
+        # Frases novas são gravadas sem espaços nas pontas; as antigas podem tê-los.
+        palavra_ok = usuario is not None and (
+            usuario.verificar_palavra_recuperacao(palavra)
+            or (palavra.strip() != palavra and usuario.verificar_palavra_recuperacao(palavra.strip()))
+        )
+
+        if palavra_ok:
             if usuario.check_senha(nova_senha):
                 flash('A nova senha não pode ser igual à senha atual.', 'warning')
                 return redirect(url_for('esqueci_senha'))
 
             usuario.migrar_palavra_recuperacao_se_legado(palavra)
             usuario.set_senha(nova_senha)
+            registrar_auditoria(
+                ACAO_AUTH_RECUPERACAO,
+                entidade='usuario',
+                entidade_id=usuario.id,
+                descricao=f'{usuario.username} redefiniu a senha pela frase de segurança',
+                usuario_id=usuario.id,
+                usuario_username=usuario.username,
+            )
             db.session.commit()
             app.logger.info('Senha redefinida via palavra de recuperação: %s', username)
             flash('Senha alterada com sucesso! Você já pode fazer login.', 'success')
             return redirect(url_for('login'))
 
         app.logger.warning('Recuperação falha para usuário: %s', username)
+        registrar_auditoria(
+            ACAO_AUTH_RECUPERACAO_FALHOU,
+            descricao=f'Tentativa de recuperação com usuário "{username}"',
+            usuario_id=None,
+            usuario_username=username or '(vazio)',
+            commit=True,
+        )
         flash('Usuário ou Palavra de Recuperação incorretos.', 'danger')
 
     return render_template('esqueci_senha.html')
@@ -583,47 +660,116 @@ def _processar_foto_base64(foto_b64):
     return raw_foto, extensao
 
 
+CAMPOS_ASSOCIADO_OBRIGATORIOS = {
+    'nome': 'Nome',
+    'matricula': 'Matrícula',
+    'rg': 'RG',
+    'cpf': 'CPF',
+    'endereco': 'Endereço',
+    'data_nascimento': 'Data de nascimento',
+    'email': 'E-mail',
+    'data_admissao': 'Data de admissão',
+}
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _validar_dados_associado(form, associado_id=None):
+    """Valida o formulário de associado. Retorna (dados, erros): `dados` já normalizados
+    para gravar no modelo e `erros` com mensagens específicas para o usuário.
+
+    `associado_id` é o registro em edição (ignorado na checagem de duplicidade)."""
+    erros = []
+    dados = {
+        'nome': form.get('nome', '').strip(),
+        'matricula': form.get('matricula', '').strip(),
+        'rg': form.get('rg', '').strip(),
+        'cpf': form.get('cpf', '').strip(),
+        'telefone': form.get('telefone', '').strip(),
+        'telefone_whatsapp': form.get('telefone_whatsapp', '').strip(),
+        'endereco': form.get('endereco', '').strip(),
+        'email': form.get('email', '').strip(),
+        'dependentes': form.get('dependentes', '').strip(),
+    }
+
+    faltando = [
+        rotulo for campo, rotulo in CAMPOS_ASSOCIADO_OBRIGATORIOS.items()
+        if not (dados.get(campo) if campo in dados else form.get(campo, '').strip())
+    ]
+    if faltando:
+        erros.append('Preencha os campos obrigatórios: ' + ', '.join(faltando) + '.')
+
+    if dados['cpf']:
+        if validar_cpf(dados['cpf']):
+            dados['cpf'] = _normalizar_cpf(dados['cpf'])
+        else:
+            erros.append('O CPF digitado é matematicamente inválido.')
+
+    if dados['email'] and not EMAIL_RE.match(dados['email']):
+        erros.append('O e-mail informado não é válido.')
+
+    hoje = datetime.now().date()
+    for campo, rotulo in (('data_nascimento', 'Data de nascimento'), ('data_admissao', 'Data de admissão')):
+        valor = form.get(campo, '').strip()
+        if not valor:
+            continue
+        try:
+            data = datetime.strptime(valor, '%Y-%m-%d').date()
+        except ValueError:
+            erros.append(f'{rotulo} inválida.')
+            continue
+        if data.year < 1900 or data > hoje:
+            erros.append(f'{rotulo} fora do intervalo permitido (1900 até hoje).')
+            continue
+        dados[campo] = data
+
+    if 'data_nascimento' in dados and 'data_admissao' in dados:
+        if dados['data_admissao'] < dados['data_nascimento']:
+            erros.append('A data de admissão não pode ser anterior à data de nascimento.')
+
+    for campo, rotulo, limite in (
+        ('nome', 'Nome', 100), ('matricula', 'Matrícula', 20), ('rg', 'RG', 20),
+        ('telefone', 'Telefone', 15), ('telefone_whatsapp', 'WhatsApp', 15), ('email', 'E-mail', 100),
+    ):
+        if len(dados[campo]) > limite:
+            erros.append(f'{rotulo} excede {limite} caracteres.')
+
+    # Duplicidade verificada antes de gravar, com mensagem específica para cada campo.
+    duplicados = Associado.query
+    if associado_id is not None:
+        duplicados = duplicados.filter(Associado.id != associado_id)
+    if dados['matricula'] and duplicados.filter(Associado.matricula == dados['matricula']).first():
+        erros.append(f'Já existe um associado com a matrícula {dados["matricula"]}.')
+    if dados['cpf'] and duplicados.filter(Associado.cpf == dados['cpf']).first():
+        erros.append(f'Já existe um associado com o CPF {dados["cpf"]}.')
+
+    return dados, erros
+
+
 @app.route('/cadastro', methods=['GET', 'POST'])
 @login_required
 def cadastro():
     if request.method == 'POST':
+        dados, erros = _validar_dados_associado(request.form)
+        if erros:
+            for erro in erros:
+                flash(erro, 'danger')
+            return render_template('cadastro.html', username=session.get('username'))
+
         try:
-            cpf_raw = request.form['cpf'].strip()
+            raw_foto, extensao = _processar_foto_base64(request.form.get('foto_base64'))
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            return render_template('cadastro.html', username=session.get('username'))
 
-            if not validar_cpf(cpf_raw):
-                flash('O CPF digitado é matematicamente inválido.', 'danger')
-                return render_template('cadastro.html', username=session.get('username'))
-
-            cpf_formatado = _normalizar_cpf(cpf_raw)
-
-            foto_b64 = request.form.get('foto_base64')
-            nome_arquivo = None
-            try:
-                raw_foto, extensao = _processar_foto_base64(foto_b64)
-            except ValueError as exc:
-                flash(str(exc), 'danger')
-                return render_template('cadastro.html', username=session.get('username'))
-
+        nome_arquivo = None
+        try:
             if raw_foto:
-                nome_arquivo = _gerar_nome_foto(request.form['matricula'], extensao)
+                nome_arquivo = _gerar_nome_foto(dados['matricula'], extensao)
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
                 with open(caminho_salvar, 'wb') as fh:
                     fh.write(raw_foto)
 
-            novo_associado = Associado(
-                nome=request.form['nome'].strip(),
-                matricula=request.form['matricula'].strip(),
-                rg=request.form['rg'].strip(),
-                cpf=cpf_formatado,
-                telefone=request.form.get('telefone', '').strip(),
-                telefone_whatsapp=request.form.get('telefone_whatsapp', '').strip(),
-                foto_perfil=nome_arquivo,
-                endereco=request.form['endereco'].strip(),
-                data_nascimento=datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date(),
-                email=request.form['email'].strip(),
-                data_admissao=datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date(),
-                dependentes=request.form.get('dependentes', '').strip(),
-            )
+            novo_associado = Associado(foto_perfil=nome_arquivo, **dados)
             db.session.add(novo_associado)
             db.session.flush()  # gera o ID antes do commit p/ usar na auditoria
             registrar_auditoria(
@@ -640,9 +786,8 @@ def cadastro():
             db.session.rollback()
             app.logger.exception('Erro ao cadastrar associado')
             # Limpa foto recém-salva em caso de rollback (evita arquivo órfão).
-            if 'nome_arquivo' in locals() and nome_arquivo:
-                _remover_foto_do_disco(nome_arquivo)
-            flash('Erro ao cadastrar. Verifique se CPF ou Matrícula já existem.', 'danger')
+            _remover_foto_do_disco(nome_arquivo)
+            flash('Erro inesperado ao cadastrar. Tente novamente ou consulte o log do servidor.', 'danger')
             return render_template('cadastro.html', username=session.get('username'))
 
     return render_template('cadastro.html', username=session.get('username'))
@@ -806,43 +951,28 @@ def editar(id):
     if request.method == 'POST':
         foto_anterior = associado.foto_perfil
         nova_foto_nome = None
+
+        dados, erros = _validar_dados_associado(request.form, associado_id=associado.id)
+        if erros:
+            for erro in erros:
+                flash(erro, 'danger')
+            return redirect(url_for('editar', id=id))
+
         try:
-            cpf_raw = request.form['cpf'].strip()
-            if not validar_cpf(cpf_raw):
-                flash('O CPF digitado é matematicamente inválido.', 'danger')
-                return redirect(url_for('editar', id=id))
-
-            cpf_formatado = _normalizar_cpf(cpf_raw)
-
             antes = {c: getattr(associado, c) for c in CAMPOS_ASSOCIADO_AUDITAVEIS}
-
-            associado.nome = request.form['nome'].strip()
-            associado.matricula = request.form['matricula'].strip()
-            associado.rg = request.form['rg'].strip()
-            associado.cpf = cpf_formatado
-            associado.telefone = request.form.get('telefone', '').strip()
-            associado.telefone_whatsapp = request.form.get('telefone_whatsapp', '').strip()
-            associado.endereco = request.form['endereco'].strip()
-
-            try:
-                associado.data_nascimento = datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date()
-                associado.data_admissao = datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date()
-            except ValueError:
-                db.session.rollback()
-                flash('Data de nascimento ou admissão inválida. Use o formato correto.', 'danger')
-                return redirect(url_for('editar', id=id))
-
-            associado.email = request.form['email'].strip()
-            associado.dependentes = request.form.get('dependentes', '').strip()
+            for campo, valor in dados.items():
+                setattr(associado, campo, valor)
 
             foto = request.files.get('foto_perfil')
             if foto and foto.filename and allowed_file(foto.filename):
                 dados_foto = foto.read()
                 if len(dados_foto) > MAX_FOTO_BYTES:
                     flash('A foto é muito grande (máximo 6 MB).', 'danger')
+                    db.session.rollback()
                     return redirect(url_for('editar', id=id))
                 if not _bytes_sao_imagem_png_ou_jpeg(dados_foto):
                     flash('Arquivo de foto inválido. Use apenas PNG ou JPEG.', 'danger')
+                    db.session.rollback()
                     return redirect(url_for('editar', id=id))
 
                 extensao = foto.filename.rsplit('.', 1)[1].lower()
@@ -875,13 +1005,13 @@ def editar(id):
             app.logger.exception('Erro ao atualizar associado id=%s', id)
             if nova_foto_nome:
                 _remover_foto_do_disco(nova_foto_nome)
-            flash('Erro ao atualizar. Verifique se o novo CPF ou Matrícula já existem no sistema.', 'danger')
+            flash('Erro inesperado ao atualizar. Tente novamente ou consulte o log do servidor.', 'danger')
 
     return render_template('editar.html', username=session.get('username'), associado=associado)
 
 
 @app.route('/excluir/<int:id>', methods=['POST'])
-@login_required
+@admin_required
 def excluir(id):
     associado = Associado.query.get_or_404(id)
     foto_para_remover = associado.foto_perfil
@@ -979,6 +1109,10 @@ def seguranca():
     if request.method == 'POST':
         senha_atual = request.form['senha_atual']
         nova_palavra = request.form['nova_palavra'].strip()
+
+        if not nova_palavra:
+            flash('A frase de segurança não pode ficar em branco.', 'danger')
+            return redirect(url_for('seguranca'))
 
         if not usuario.check_senha(senha_atual):
             flash('Senha atual incorreta.', 'danger')
@@ -1184,6 +1318,16 @@ def auditoria():
 @app.route('/exportar_lista_simples', methods=['POST'])
 @login_required
 def exportar_lista_simples():
+    max_linhas = _exportar_lista_simples_max()
+    total = Associado.query.count()
+    if total > max_linhas:
+        flash(
+            f'A lista teria {total} associados, acima do limite configurado de {max_linhas}. '
+            f'Use a busca com filtros ou aumente EXPORTAR_LISTA_SIMPLES_MAX no ambiente — com cuidado.',
+            'warning',
+        )
+        return redirect(url_for('listar_todos'))
+
     associados = Associado.query.order_by(Associado.nome).all()
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 

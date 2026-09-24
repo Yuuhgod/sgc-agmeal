@@ -9,7 +9,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 ## Funcionalidades
 - **Autenticação:** login com setup guiado de primeira execução e rate limiting.
 - **Recuperação de Acesso:** fluxo de redefinição de senha via Frase de Segurança.
-- **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão e listagem paginada.
+- **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
@@ -87,6 +87,9 @@ bash start.sh      # inicia o servidor
 | `BACKUP_KEEP_SYNC` | `60` | Quantidade de ZIPs a manter na pasta `BACKUP_SYNC_DIR`. |
 | `MAX_CONTENT_LENGTH_MB` | `128` | Limite máximo de upload (útil para restaurar ZIPs grandes). |
 | `EXPORTAR_PDF_MAX_SEM_FILTRO` | `400` | Máximo de associados permitidos ao exportar PDF na **busca** sem nenhum filtro; acima disto é pedido um filtro ou use a página **Listar**. |
+| `EXPORTAR_LISTA_SIMPLES_MAX` | `5000` | Máximo de associados na **lista simples** em PDF (página **Listar**); acima disto a exportação é recusada. |
+| `LOGIN_MAX_FALHAS_IP` | `10` | Falhas de login (ou de recuperação de senha) por IP antes de bloquear temporariamente. |
+| `LOGIN_JANELA_MINUTOS` | `5` | Janela, em minutos, usada na contagem de falhas acima. |
 
 ### `data/.flask_secret` (permissões)
 
