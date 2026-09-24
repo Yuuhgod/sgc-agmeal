@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
@@ -27,6 +28,7 @@ from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import extract, inspect, text
+from sqlalchemy.orm import selectinload
 from weasyprint import HTML
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
@@ -35,21 +37,32 @@ from database import (
     ACAO_ASSOCIADO_CRIAR,
     ACAO_ASSOCIADO_EDITAR,
     ACAO_ASSOCIADO_EXCLUIR,
+    ACAO_ASSOCIADO_EXPORTAR,
     ACAO_AUTH_LOGIN,
     ACAO_AUTH_LOGIN_FALHOU,
     ACAO_AUTH_LOGOUT,
+    ACAO_AUTH_RECUPERACAO,
+    ACAO_AUTH_RECUPERACAO_FALHOU,
     ACAO_SISTEMA_BACKUP,
     ACAO_SISTEMA_RESTORE,
     ACAO_USUARIO_CRIAR,
+    ACAO_USUARIO_EDITAR,
     ACAO_USUARIO_EXCLUIR,
+    ACAO_USUARIO_SENHA_REDEFINIDA,
+    ACAO_USUARIO_SENHA_TROCADA,
     ACAO_USUARIO_PALAVRA,
     ACAO_USUARIO_PERFIL,
     ACOES_ROTULOS,
     Associado,
     Auditoria,
+    Dependente,
+    PARENTESCO_NAO_INFORMADO,
+    PARENTESCOS,
     ROLE_ADMIN,
     ROLE_USUARIO,
     ROLES_VALIDAS,
+    SITUACAO_ATIVO,
+    SITUACOES_ROTULOS,
     Usuario,
     db,
 )
@@ -60,7 +73,8 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 basedir = os.path.abspath(os.path.dirname(__file__))
-data_dir = os.path.join(basedir, '..', 'data')
+# SGC_DATA_DIR permite apontar outra pasta de dados (ex.: pasta temporária nos testes).
+data_dir = os.environ.get('SGC_DATA_DIR') or os.path.join(basedir, '..', 'data')
 os.makedirs(data_dir, exist_ok=True)
 
 
@@ -145,6 +159,9 @@ limiter = Limiter(
 LOGIN_MAX_FALHAS_IP = max(1, int(os.environ.get('LOGIN_MAX_FALHAS_IP', '10')))
 LOGIN_JANELA_MINUTOS = max(1, int(os.environ.get('LOGIN_JANELA_MINUTOS', '5')))
 
+# Sessão parada por mais tempo que isto é encerrada (além do limite absoluto de 8 horas).
+SESSAO_INATIVIDADE_MINUTOS = max(1, int(os.environ.get('SESSAO_INATIVIDADE_MINUTOS', '30')))
+
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads', 'fotos')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -202,6 +219,7 @@ def _gerar_nome_foto(matricula, extensao):
 db.init_app(app)
 
 from backup_service import criar_backup_zip, listar_backups_locais
+from planilha_service import gerar_csv, gerar_xlsx
 from restore_service import aplicar_restauracao, extrair_zip_seguro
 
 migrate = Migrate(app, db)
@@ -234,6 +252,14 @@ def _exportar_pdf_max_sem_filtro() -> int:
         return 400
 
 
+def _exportar_lista_simples_max() -> int:
+    """Máximo de linhas na «lista simples» em PDF (só texto, bem mais leve que as fichas)."""
+    try:
+        return max(1, int(os.environ.get('EXPORTAR_LISTA_SIMPLES_MAX', '5000')))
+    except ValueError:
+        return 5000
+
+
 
 def _garantir_coluna_role():
     """Mini-migração idempotente: adiciona 'role' em bancos antigos e define usuários
@@ -260,7 +286,89 @@ def _garantir_coluna_role():
         raise
 
 
-with app.app_context():
+# Colunas acrescentadas depois da primeira versão (bancos antigos não as têm).
+# Também aplicadas pelas migrações Alembic equivalentes, para quem usa `flask db upgrade`.
+COLUNAS_NOVAS = {
+    'associados': (
+        ('situacao', "VARCHAR(20) NOT NULL DEFAULT 'ativo'"),
+        ('situacao_data', 'DATE'),
+        ('situacao_motivo', 'VARCHAR(200)'),
+    ),
+    'usuarios': (
+        ('ativo', 'BOOLEAN NOT NULL DEFAULT 1'),
+        ('trocar_senha', 'BOOLEAN NOT NULL DEFAULT 0'),
+    ),
+}
+
+
+def _garantir_colunas_novas():
+    """Mini-migração idempotente das colunas acrescentadas depois da primeira versão.
+
+    Registros existentes recebem o padrão (associado 'ativo', usuário ativo e sem troca
+    de senha pendente). Tolerante a corrida entre workers."""
+    inspector = inspect(db.engine)
+    tabelas = set(inspector.get_table_names())
+    for tabela, colunas in COLUNAS_NOVAS.items():
+        if tabela not in tabelas:
+            continue
+        existentes = {c['name'] for c in inspector.get_columns(tabela)}
+        for nome, ddl in colunas:
+            if nome in existentes:
+                continue
+            try:
+                with db.engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {tabela} ADD COLUMN {nome} {ddl}'))
+                app.logger.info("Coluna '%s' adicionada em '%s'.", nome, tabela)
+            except Exception as exc:
+                if 'duplicate column' in str(exc).lower():
+                    continue
+                raise
+    if 'associados' not in tabelas:
+        return
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_associados_situacao ON associados (situacao)'
+        ))
+
+
+def _separar_nomes_legados(texto):
+    """'Maria, João; Ana' -> ['Maria', 'João', 'Ana'] (limite de 100 caracteres por nome)."""
+    return [n.strip()[:100] for n in re.split(r'[,;\n]+', texto or '') if n.strip()]
+
+
+def _converter_dependentes_legados():
+    """Converte, uma única vez, o texto livre de dependentes em registros da tabela nova.
+
+    A marca em `sgc_meta` é gravada na mesma transação da conversão; o INSERT OR IGNORE
+    serializa os workers do Gunicorn (só quem inserir a marca converte). Restaurar um
+    backup antigo (sem a marca) converte os dados dele."""
+    with db.engine.begin() as conn:
+        conn.execute(text(
+            'CREATE TABLE IF NOT EXISTS sgc_meta (chave VARCHAR(50) PRIMARY KEY, valor VARCHAR(200))'
+        ))
+        marcou = conn.execute(
+            text("INSERT OR IGNORE INTO sgc_meta (chave, valor) VALUES ('dependentes_convertidos', :v)"),
+            {'v': datetime.now().isoformat(timespec='seconds')},
+        ).rowcount
+        if not marcou:
+            return
+        linhas = conn.execute(text(
+            "SELECT id, dependentes FROM associados WHERE dependentes IS NOT NULL AND TRIM(dependentes) != ''"
+        )).all()
+        total = 0
+        for associado_id, texto_legado in linhas:
+            for nome in _separar_nomes_legados(texto_legado):
+                conn.execute(
+                    text('INSERT INTO dependentes_associado (associado_id, nome, parentesco) '
+                         'VALUES (:a, :n, :p)'),
+                    {'a': associado_id, 'n': nome, 'p': PARENTESCO_NAO_INFORMADO},
+                )
+                total += 1
+    if total:
+        app.logger.info('Dependentes convertidos do texto antigo: %s registro(s).', total)
+
+
+def _criar_tabelas():
     try:
         db.create_all()
     except Exception as exc:
@@ -269,7 +377,18 @@ with app.app_context():
             app.logger.info('Tabelas já existem (criadas por outro worker) — ignorando.')
         else:
             raise
+
+
+def _garantir_schema():
+    """Deixa o banco no formato atual. Idempotente: roda ao iniciar e após restaurar backup."""
+    _criar_tabelas()
     _garantir_coluna_role()
+    _garantir_colunas_novas()
+    _converter_dependentes_legados()
+
+
+with app.app_context():
+    _garantir_schema()
 
 
 def validar_cpf(cpf):
@@ -303,6 +422,46 @@ def verificar_primeiro_acesso():
 
 
 @app.before_request
+def sincronizar_sessao_com_banco():
+    """Revalida a sessão a cada requisição contra o banco:
+
+    - usuário excluído ou desativado: encerra a sessão;
+    - sessão parada há mais de SESSAO_INATIVIDADE_MINUTOS: encerra a sessão;
+    - papel e nome vêm do banco (um admin rebaixado perde o acesso na hora);
+    - senha provisória pendente: só deixa acessar a troca de senha e o logout."""
+    if request.endpoint == 'static' and not request.path.startswith('/static/uploads/'):
+        return
+    usuario_id = session.get('usuario_id')
+    if usuario_id is None:
+        return
+    usuario = db.session.get(Usuario, usuario_id)
+    if usuario is None or not usuario.ativo:
+        session.clear()
+        motivo = 'o usuário não existe mais' if usuario is None else 'a conta foi desativada'
+        flash(f'Sua sessão foi encerrada porque {motivo}.', 'warning')
+        return redirect(url_for('login'))
+
+    agora = int(time.time())
+    ultimo = session.get('ultimo_acesso', agora)
+    if agora - ultimo > SESSAO_INATIVIDADE_MINUTOS * 60:
+        session.clear()
+        flash('Sua sessão expirou por inatividade. Entre novamente.', 'warning')
+        return redirect(url_for('login'))
+    # Atualiza no máximo uma vez por minuto (evita reenviar o cookie em toda resposta).
+    if agora - ultimo >= 60 or 'ultimo_acesso' not in session:
+        session['ultimo_acesso'] = agora
+
+    # Só grava se mudou, para não reenviar o cookie de sessão em toda resposta.
+    if session.get('role') != usuario.role:
+        session['role'] = usuario.role
+    if session.get('username') != usuario.username:
+        session['username'] = usuario.username
+
+    if usuario.trocar_senha and request.endpoint not in ('trocar_senha', 'logout', 'static'):
+        return redirect(url_for('trocar_senha'))
+
+
+@app.before_request
 def proteger_uploads():
     """Impede acesso anônimo às fotos dos associados (dados pessoais) servidas em
     /static/uploads/. Nos PDFs as fotos são lidas do disco (file://), sem passar por aqui."""
@@ -314,9 +473,15 @@ def proteger_uploads():
 @app.after_request
 def add_header(response):
     """Cabeçalhos de segurança + impede cache de páginas autenticadas."""
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    if request.path.startswith('/static/vendor/') and response.status_code in (200, 304):
+        # Bibliotecas locais têm a versão no caminho (ex.: bootstrap-5.3.2): nunca mudam.
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers.pop("Pragma", None)
+        response.headers.pop("Expires", None)
+    else:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -324,9 +489,9 @@ def add_header(response):
         "Content-Security-Policy",
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "font-src 'self' data: https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; base-uri 'self'; "
         "form-action 'self'; frame-ancestors 'none'",
     )
@@ -370,6 +535,8 @@ def inject_sessao():
     return {
         'sessao_is_admin': session.get('role') == ROLE_ADMIN,
         'sessao_role': session.get('role'),
+        'situacoes': SITUACOES_ROTULOS,
+        'parentescos': PARENTESCOS,
     }
 
 
@@ -412,8 +579,8 @@ def registrar_auditoria(
         app.logger.exception('Falha ao registrar auditoria (acao=%s)', acao)
 
 
-def _login_bloqueado_por_ip(ip):
-    """True se este IP excedeu o limite de falhas de login na janela recente.
+def _ip_bloqueado(ip, acao_falha):
+    """True se este IP excedeu o limite de falhas (`acao_falha`) na janela recente.
 
     Usa a trilha de auditoria como armazenamento partilhado entre workers, garantindo
     proteção contra força bruta mesmo na instalação padrão (sem Nginx)."""
@@ -421,11 +588,19 @@ def _login_bloqueado_por_ip(ip):
         return False
     desde = datetime.now() - timedelta(minutes=LOGIN_JANELA_MINUTOS)
     falhas = Auditoria.query.filter(
-        Auditoria.acao == ACAO_AUTH_LOGIN_FALHOU,
+        Auditoria.acao == acao_falha,
         Auditoria.ip_origem == ip,
         Auditoria.data_hora >= desde,
     ).count()
     return falhas >= LOGIN_MAX_FALHAS_IP
+
+
+def _login_bloqueado_por_ip(ip):
+    return _ip_bloqueado(ip, ACAO_AUTH_LOGIN_FALHOU)
+
+
+def _recuperacao_bloqueada_por_ip(ip):
+    return _ip_bloqueado(ip, ACAO_AUTH_RECUPERACAO_FALHOU)
 
 
 @app.route('/setup', methods=['GET', 'POST'])
@@ -436,7 +611,11 @@ def setup():
     if request.method == 'POST':
         username = request.form['username'].strip()
         senha = request.form['senha']
-        palavra = request.form['palavra_recuperacao']
+        palavra = request.form['palavra_recuperacao'].strip()
+
+        if not username or not palavra:
+            flash('Usuário e frase de segurança são obrigatórios.', 'danger')
+            return render_template('setup.html')
 
         if len(senha) < 8:
             flash('A senha deve ter no mínimo 8 caracteres.', 'danger')
@@ -480,11 +659,25 @@ def login():
 
         usuario = Usuario.query.filter_by(username=username).first()
 
+        if usuario and usuario.check_senha(senha) and not usuario.ativo:
+            # Só revelado a quem acertou a senha: não serve para descobrir contas.
+            app.logger.warning('Login recusado (conta desativada): %s', username)
+            registrar_auditoria(
+                ACAO_AUTH_LOGIN_FALHOU,
+                descricao=f'Conta desativada: "{username}"',
+                usuario_id=usuario.id,
+                usuario_username=usuario.username,
+                commit=True,
+            )
+            flash('Esta conta está desativada. Procure um administrador.', 'danger')
+            return render_template('login.html')
+
         if usuario and usuario.check_senha(senha):
             session.clear()
             session['usuario_id'] = usuario.id
             session['username'] = usuario.username
             session['role'] = usuario.role
+            session['ultimo_acesso'] = int(time.time())
             session.permanent = True
             app.logger.info('Login bem-sucedido: %s (role=%s)', username, usuario.role)
             registrar_auditoria(
@@ -537,31 +730,110 @@ def esqueci_senha():
             flash('A nova senha deve ter no mínimo 8 caracteres.', 'danger')
             return render_template('esqueci_senha.html')
 
+        if _recuperacao_bloqueada_por_ip(request.remote_addr):
+            app.logger.warning(
+                'Recuperação bloqueada por excesso de tentativas: ip=%s usuario=%s',
+                request.remote_addr, username,
+            )
+            flash(
+                'Muitas tentativas de recuperação malsucedidas deste computador. '
+                'Aguarde alguns minutos e tente novamente.',
+                'danger',
+            )
+            return render_template('esqueci_senha.html')
+
         usuario = Usuario.query.filter_by(username=username).first()
 
-        if usuario and usuario.verificar_palavra_recuperacao(palavra):
+        # Frases novas são gravadas sem espaços nas pontas; as antigas podem tê-los.
+        palavra_ok = usuario is not None and usuario.ativo and (
+            usuario.verificar_palavra_recuperacao(palavra)
+            or (palavra.strip() != palavra and usuario.verificar_palavra_recuperacao(palavra.strip()))
+        )
+
+        if palavra_ok:
             if usuario.check_senha(nova_senha):
                 flash('A nova senha não pode ser igual à senha atual.', 'warning')
                 return redirect(url_for('esqueci_senha'))
 
             usuario.migrar_palavra_recuperacao_se_legado(palavra)
             usuario.set_senha(nova_senha)
+            usuario.trocar_senha = False
+            registrar_auditoria(
+                ACAO_AUTH_RECUPERACAO,
+                entidade='usuario',
+                entidade_id=usuario.id,
+                descricao=f'{usuario.username} redefiniu a senha pela frase de segurança',
+                usuario_id=usuario.id,
+                usuario_username=usuario.username,
+            )
             db.session.commit()
             app.logger.info('Senha redefinida via palavra de recuperação: %s', username)
             flash('Senha alterada com sucesso! Você já pode fazer login.', 'success')
             return redirect(url_for('login'))
 
         app.logger.warning('Recuperação falha para usuário: %s', username)
+        registrar_auditoria(
+            ACAO_AUTH_RECUPERACAO_FALHOU,
+            descricao=f'Tentativa de recuperação com usuário "{username}"',
+            usuario_id=None,
+            usuario_username=username or '(vazio)',
+            commit=True,
+        )
         flash('Usuário ou Palavra de Recuperação incorretos.', 'danger')
 
     return render_template('esqueci_senha.html')
 
 
+MESES_PT = (
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+)
+
+
 @app.route('/')
 @login_required
 def dashboard():
-    total_associados = Associado.query.count()
-    return render_template('dashboard.html', username=session.get('username'), total=total_associados)
+    contagem = dict(
+        db.session.query(Associado.situacao, db.func.count(Associado.id))
+        .group_by(Associado.situacao).all()
+    )
+    hoje = datetime.now().date()
+
+    # Aniversariantes do mês (só ativos), em ordem de dia.
+    aniversariantes = (
+        Associado.query
+        .filter(Associado.situacao == SITUACAO_ATIVO)
+        .filter(extract('month', Associado.data_nascimento) == hoje.month)
+        .order_by(extract('day', Associado.data_nascimento), Associado.nome)
+        .all()
+    )
+
+    # Novos cadastros no mês corrente (data_criacao é gravada em UTC; a margem é irrelevante aqui).
+    inicio_mes = datetime(hoje.year, hoje.month, 1)
+    novos_no_mes = Associado.query.filter(Associado.data_criacao >= inicio_mes).count()
+
+    # Admissões por ano nos últimos 10 anos (inclui anos sem admissão, com zero).
+    anos = list(range(hoje.year - 9, hoje.year + 1))
+    ano_col = extract('year', Associado.data_admissao)
+    por_ano = dict(
+        db.session.query(ano_col, db.func.count(Associado.id))
+        .filter(ano_col >= anos[0])
+        .group_by(ano_col).all()
+    )
+    admissoes_por_ano = [(ano, int(por_ano.get(ano, 0))) for ano in anos]
+
+    return render_template(
+        'dashboard.html',
+        username=session.get('username'),
+        total=sum(contagem.values()),
+        por_situacao={s: contagem.get(s, 0) for s in SITUACOES_ROTULOS},
+        hoje=hoje,
+        mes_nome=MESES_PT[hoje.month - 1],
+        aniversariantes=aniversariantes,
+        novos_no_mes=novos_no_mes,
+        admissoes_por_ano=admissoes_por_ano,
+        admissoes_max=max((n for _, n in admissoes_por_ano), default=0),
+    )
 
 
 def _processar_foto_base64(foto_b64):
@@ -583,47 +855,221 @@ def _processar_foto_base64(foto_b64):
     return raw_foto, extensao
 
 
+CAMPOS_ASSOCIADO_OBRIGATORIOS = {
+    'nome': 'Nome',
+    'matricula': 'Matrícula',
+    'rg': 'RG',
+    'cpf': 'CPF',
+    'endereco': 'Endereço',
+    'data_nascimento': 'Data de nascimento',
+    'email': 'E-mail',
+    'data_admissao': 'Data de admissão',
+}
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+MAX_DEPENDENTES = 20
+
+
+def _dependentes_do_form(form):
+    """Linhas de dependentes do formulário (campos dep_* repetidos), como texto cru.
+    Linhas totalmente em branco são ignoradas."""
+    colunas = [form.getlist(f'dep_{c}') for c in ('nome', 'parentesco', 'nascimento', 'cpf')]
+    linhas = []
+    for nome, parentesco, nascimento, cpf in zip(*colunas):
+        linha = {
+            'nome': nome.strip(), 'parentesco': parentesco.strip(),
+            'nascimento': nascimento.strip(), 'cpf': cpf.strip(),
+        }
+        if linha['nome'] or linha['nascimento'] or linha['cpf']:
+            linhas.append(linha)
+    return linhas
+
+
+def _validar_dependentes(form, cpf_titular=None):
+    """Valida os dependentes do formulário. Retorna (lista de dicts para o modelo, erros)."""
+    erros, dependentes, cpfs = [], [], set()
+    hoje = datetime.now().date()
+    linhas = _dependentes_do_form(form)
+    if len(linhas) > MAX_DEPENDENTES:
+        erros.append(f'Informe no máximo {MAX_DEPENDENTES} dependentes.')
+        return [], erros
+
+    for n, linha in enumerate(linhas, start=1):
+        rotulo = f'Dependente {n}'
+        if not linha['nome']:
+            erros.append(f'{rotulo}: informe o nome.')
+        elif len(linha['nome']) > 100:
+            erros.append(f'{rotulo}: nome excede 100 caracteres.')
+        parentesco = linha['parentesco'] or PARENTESCO_NAO_INFORMADO
+        if parentesco not in PARENTESCOS:
+            erros.append(f'{rotulo}: parentesco inválido.')
+
+        nascimento = None
+        if linha['nascimento']:
+            try:
+                nascimento = datetime.strptime(linha['nascimento'], '%Y-%m-%d').date()
+                if nascimento.year < 1900 or nascimento > hoje:
+                    erros.append(f'{rotulo}: data de nascimento fora do intervalo permitido (1900 até hoje).')
+            except ValueError:
+                erros.append(f'{rotulo}: data de nascimento inválida.')
+
+        cpf = None
+        if linha['cpf']:
+            if not validar_cpf(linha['cpf']):
+                erros.append(f'{rotulo}: CPF inválido.')
+            else:
+                cpf = _normalizar_cpf(linha['cpf'])
+                if cpf == cpf_titular:
+                    erros.append(f'{rotulo}: o CPF é o mesmo do associado titular.')
+                elif cpf in cpfs:
+                    erros.append(f'{rotulo}: CPF repetido na lista de dependentes.')
+                cpfs.add(cpf)
+
+        dependentes.append({
+            'nome': linha['nome'], 'parentesco': parentesco,
+            'data_nascimento': nascimento, 'cpf': cpf,
+        })
+    return dependentes, erros
+
+
+def _resumo_dependentes(dependentes):
+    # Ordenado: a lista do formulário vem na ordem digitada, a do banco por nome.
+    return '; '.join(sorted(d.resumo() for d in dependentes)) or '(nenhum)'
+
+
+def _validar_dados_associado(form, associado_id=None):
+    """Valida o formulário de associado. Retorna (dados, erros): `dados` já normalizados
+    para gravar no modelo e `erros` com mensagens específicas para o usuário.
+
+    `associado_id` é o registro em edição (ignorado na checagem de duplicidade)."""
+    erros = []
+    dados = {
+        'nome': form.get('nome', '').strip(),
+        'matricula': form.get('matricula', '').strip(),
+        'rg': form.get('rg', '').strip(),
+        'cpf': form.get('cpf', '').strip(),
+        'telefone': form.get('telefone', '').strip(),
+        'telefone_whatsapp': form.get('telefone_whatsapp', '').strip(),
+        'endereco': form.get('endereco', '').strip(),
+        'email': form.get('email', '').strip(),
+    }
+
+    faltando = [
+        rotulo for campo, rotulo in CAMPOS_ASSOCIADO_OBRIGATORIOS.items()
+        if not (dados.get(campo) if campo in dados else form.get(campo, '').strip())
+    ]
+    if faltando:
+        erros.append('Preencha os campos obrigatórios: ' + ', '.join(faltando) + '.')
+
+    if dados['cpf']:
+        if validar_cpf(dados['cpf']):
+            dados['cpf'] = _normalizar_cpf(dados['cpf'])
+        else:
+            erros.append('O CPF digitado é matematicamente inválido.')
+
+    if dados['email'] and not EMAIL_RE.match(dados['email']):
+        erros.append('O e-mail informado não é válido.')
+
+    hoje = datetime.now().date()
+    for campo, rotulo in (('data_nascimento', 'Data de nascimento'), ('data_admissao', 'Data de admissão')):
+        valor = form.get(campo, '').strip()
+        if not valor:
+            continue
+        try:
+            data = datetime.strptime(valor, '%Y-%m-%d').date()
+        except ValueError:
+            erros.append(f'{rotulo} inválida.')
+            continue
+        if data.year < 1900 or data > hoje:
+            erros.append(f'{rotulo} fora do intervalo permitido (1900 até hoje).')
+            continue
+        dados[campo] = data
+
+    if 'data_nascimento' in dados and 'data_admissao' in dados:
+        if dados['data_admissao'] < dados['data_nascimento']:
+            erros.append('A data de admissão não pode ser anterior à data de nascimento.')
+
+    for campo, rotulo, limite in (
+        ('nome', 'Nome', 100), ('matricula', 'Matrícula', 20), ('rg', 'RG', 20),
+        ('telefone', 'Telefone', 15), ('telefone_whatsapp', 'WhatsApp', 15), ('email', 'E-mail', 100),
+    ):
+        if len(dados[campo]) > limite:
+            erros.append(f'{rotulo} excede {limite} caracteres.')
+
+    # Situação cadastral: só vem no formulário de edição (novos cadastros entram como ativos).
+    if 'situacao' in form:
+        situacao = form.get('situacao', '').strip()
+        if situacao not in SITUACOES_ROTULOS:
+            erros.append('Situação inválida.')
+        elif situacao == SITUACAO_ATIVO:
+            dados.update(situacao=situacao, situacao_data=None, situacao_motivo=None)
+        else:
+            motivo = form.get('situacao_motivo', '').strip()
+            if len(motivo) > 200:
+                erros.append('O motivo da situação excede 200 caracteres.')
+            valor = form.get('situacao_data', '').strip()
+            try:
+                data_situacao = datetime.strptime(valor, '%Y-%m-%d').date() if valor else hoje
+            except ValueError:
+                erros.append('Data da situação inválida.')
+                data_situacao = None
+            if data_situacao is not None:
+                if data_situacao > hoje:
+                    erros.append('A data da situação não pode ser futura.')
+                elif 'data_admissao' in dados and data_situacao < dados['data_admissao']:
+                    erros.append('A data da situação não pode ser anterior à data de admissão.')
+            dados.update(situacao=situacao, situacao_data=data_situacao, situacao_motivo=motivo or None)
+
+    # Duplicidade verificada antes de gravar, com mensagem específica para cada campo.
+    duplicados = Associado.query
+    if associado_id is not None:
+        duplicados = duplicados.filter(Associado.id != associado_id)
+    if dados['matricula'] and duplicados.filter(Associado.matricula == dados['matricula']).first():
+        erros.append(f'Já existe um associado com a matrícula {dados["matricula"]}.')
+    if dados['cpf'] and duplicados.filter(Associado.cpf == dados['cpf']).first():
+        erros.append(f'Já existe um associado com o CPF {dados["cpf"]}.')
+
+    return dados, erros
+
+
+def _render_cadastro():
+    """Formulário de cadastro; num POST com erro, devolve as linhas de dependentes digitadas."""
+    return render_template(
+        'cadastro.html',
+        username=session.get('username'),
+        dependentes_form=_dependentes_do_form(request.form) if request.method == 'POST' else [],
+    )
+
+
 @app.route('/cadastro', methods=['GET', 'POST'])
 @login_required
 def cadastro():
     if request.method == 'POST':
+        dados, erros = _validar_dados_associado(request.form)
+        dependentes, erros_dep = _validar_dependentes(request.form, cpf_titular=dados.get('cpf'))
+        erros += erros_dep
+        if erros:
+            for erro in erros:
+                flash(erro, 'danger')
+            return _render_cadastro()
+
         try:
-            cpf_raw = request.form['cpf'].strip()
+            raw_foto, extensao = _processar_foto_base64(request.form.get('foto_base64'))
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            return _render_cadastro()
 
-            if not validar_cpf(cpf_raw):
-                flash('O CPF digitado é matematicamente inválido.', 'danger')
-                return render_template('cadastro.html', username=session.get('username'))
-
-            cpf_formatado = _normalizar_cpf(cpf_raw)
-
-            foto_b64 = request.form.get('foto_base64')
-            nome_arquivo = None
-            try:
-                raw_foto, extensao = _processar_foto_base64(foto_b64)
-            except ValueError as exc:
-                flash(str(exc), 'danger')
-                return render_template('cadastro.html', username=session.get('username'))
-
+        nome_arquivo = None
+        try:
             if raw_foto:
-                nome_arquivo = _gerar_nome_foto(request.form['matricula'], extensao)
+                nome_arquivo = _gerar_nome_foto(dados['matricula'], extensao)
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo)
                 with open(caminho_salvar, 'wb') as fh:
                     fh.write(raw_foto)
 
-            novo_associado = Associado(
-                nome=request.form['nome'].strip(),
-                matricula=request.form['matricula'].strip(),
-                rg=request.form['rg'].strip(),
-                cpf=cpf_formatado,
-                telefone=request.form.get('telefone', '').strip(),
-                telefone_whatsapp=request.form.get('telefone_whatsapp', '').strip(),
-                foto_perfil=nome_arquivo,
-                endereco=request.form['endereco'].strip(),
-                data_nascimento=datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date(),
-                email=request.form['email'].strip(),
-                data_admissao=datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date(),
-                dependentes=request.form.get('dependentes', '').strip(),
-            )
+            novo_associado = Associado(foto_perfil=nome_arquivo, **dados)
+            novo_associado.dependentes = [Dependente(**d) for d in dependentes]
             db.session.add(novo_associado)
             db.session.flush()  # gera o ID antes do commit p/ usar na auditoria
             registrar_auditoria(
@@ -640,21 +1086,39 @@ def cadastro():
             db.session.rollback()
             app.logger.exception('Erro ao cadastrar associado')
             # Limpa foto recém-salva em caso de rollback (evita arquivo órfão).
-            if 'nome_arquivo' in locals() and nome_arquivo:
-                _remover_foto_do_disco(nome_arquivo)
-            flash('Erro ao cadastrar. Verifique se CPF ou Matrícula já existem.', 'danger')
-            return render_template('cadastro.html', username=session.get('username'))
+            _remover_foto_do_disco(nome_arquivo)
+            flash('Erro inesperado ao cadastrar. Tente novamente ou consulte o log do servidor.', 'danger')
+            return _render_cadastro()
 
-    return render_template('cadastro.html', username=session.get('username'))
+    return _render_cadastro()
 
 
-def _aplicar_filtros_busca(query, nome_busca, matricula_busca, ano_busca):
-    if nome_busca:
-        query = query.filter(Associado.nome.ilike(f'%{nome_busca}%'))
-    if matricula_busca:
-        query = query.filter(Associado.matricula == matricula_busca)
-    if ano_busca:
-        query = query.filter(extract('year', Associado.data_admissao) == int(ano_busca))
+FILTROS_BUSCA = ('nome', 'matricula', 'ano', 'situacao')
+
+
+def _ler_filtros(fonte, sufixo=''):
+    """Lê os filtros de busca de um formulário/args (`sufixo` p/ campos ocultos de exportação)."""
+    filtros = {c: fonte.get(c + sufixo, '').strip() for c in FILTROS_BUSCA}
+    if filtros['situacao'] not in SITUACOES_ROTULOS:
+        filtros['situacao'] = ''
+    return filtros
+
+
+def _filtros_texto_vazios(filtros):
+    """True se não há filtro de nome, matrícula nem ano (a situação sozinha não reduz o bastante)."""
+    return not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
+
+
+def _aplicar_filtros_busca(query, filtros):
+    """Aplica os filtros à consulta. Levanta ValueError se o ano não for numérico."""
+    if filtros['nome']:
+        query = query.filter(Associado.nome.ilike(f"%{filtros['nome']}%"))
+    if filtros['matricula']:
+        query = query.filter(Associado.matricula == filtros['matricula'])
+    if filtros['ano']:
+        query = query.filter(extract('year', Associado.data_admissao) == int(filtros['ano']))
+    if filtros['situacao']:
+        query = query.filter(Associado.situacao == filtros['situacao'])
     return query
 
 
@@ -662,20 +1126,13 @@ def _aplicar_filtros_busca(query, nome_busca, matricula_busca, ano_busca):
 @login_required
 def buscar():
     resultados = None
-    filtros = {'nome': '', 'matricula': '', 'ano': ''}
+    filtros = {c: '' for c in FILTROS_BUSCA}
 
     if request.method == 'POST':
-        filtros['nome'] = request.form.get('nome', '').strip()
-        filtros['matricula'] = request.form.get('matricula', '').strip()
-        filtros['ano'] = request.form.get('ano', '').strip()
+        filtros = _ler_filtros(request.form)
 
         try:
-            query = _aplicar_filtros_busca(
-                Associado.query.order_by(Associado.nome),
-                filtros['nome'],
-                filtros['matricula'],
-                filtros['ano'],
-            )
+            query = _aplicar_filtros_busca(Associado.query.order_by(Associado.nome), filtros)
             resultados = query.all()
         except ValueError:
             flash('Ano de admissão inválido.', 'warning')
@@ -684,12 +1141,13 @@ def buscar():
         if not resultados:
             flash('Nenhum registro encontrado com estes filtros.', 'warning')
 
-    filtros_vazios = not (filtros['nome'] or filtros['matricula'] or filtros['ano'])
+    # Filtrar só pela situação não conta como filtro para o limite do PDF, mas o aviso
+    # só aparece se não houver filtro nenhum ou se o resultado passar do limite.
     aviso_pdf_busca_sem_filtro = (
         request.method == 'POST'
-        and filtros_vazios
-        and resultados is not None
-        and len(resultados) > 0
+        and _filtros_texto_vazios(filtros)
+        and bool(resultados)
+        and (not filtros['situacao'] or len(resultados) > _exportar_pdf_max_sem_filtro())
     )
 
     return render_template(
@@ -705,19 +1163,13 @@ def buscar():
 @app.route('/exportar_pdf', methods=['POST'])
 @login_required
 def exportar_pdf():
-    nome_busca = request.form.get('nome_export', '').strip()
-    matricula_busca = request.form.get('matricula_export', '').strip()
-    ano_busca = request.form.get('ano_export', '').strip()
+    filtros = _ler_filtros(request.form, sufixo='_export')
 
     try:
         query = _aplicar_filtros_busca(
-            Associado.query.order_by(Associado.nome),
-            nome_busca,
-            matricula_busca,
-            ano_busca,
+            Associado.query.options(selectinload(Associado.dependentes)).order_by(Associado.nome), filtros,
         )
-        filtros_vazios = not nome_busca and not matricula_busca and not ano_busca
-        if filtros_vazios:
+        if _filtros_texto_vazios(filtros):
             max_sem = _exportar_pdf_max_sem_filtro()
             total = query.count()
             if total > max_sem:
@@ -755,6 +1207,54 @@ def exportar_pdf():
     return response
 
 
+FORMATOS_PLANILHA = {
+    'csv': ('text/csv; charset=utf-8', gerar_csv),
+    'xlsx': ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', gerar_xlsx),
+}
+
+
+@app.route('/exportar_planilha', methods=['POST'])
+@login_required
+def exportar_planilha():
+    """Exporta os associados filtrados (mesmos filtros da busca) em CSV ou XLSX."""
+    formato = request.form.get('formato', '').strip().lower()
+    if formato not in FORMATOS_PLANILHA:
+        flash('Formato de planilha inválido.', 'warning')
+        return redirect(request.referrer or url_for('buscar'))
+
+    filtros = _ler_filtros(request.form, sufixo='_export')
+    try:
+        associados = _aplicar_filtros_busca(
+            Associado.query.options(selectinload(Associado.dependentes)).order_by(Associado.nome), filtros,
+        ).all()
+    except ValueError:
+        flash('Ano de admissão inválido.', 'warning')
+        return redirect(url_for('buscar'))
+
+    if not associados:
+        flash('Nenhum dado para exportar.', 'warning')
+        return redirect(request.referrer or url_for('buscar'))
+
+    mimetype, gerar = FORMATOS_PLANILHA[formato]
+    conteudo = gerar(associados)
+
+    # Planilhas levam dados pessoais para fora do sistema: fica registrado quem exportou o quê.
+    filtros_usados = ', '.join(f'{k}={v}' for k, v in filtros.items() if v) or 'nenhum'
+    registrar_auditoria(
+        ACAO_ASSOCIADO_EXPORTAR,
+        entidade='associado',
+        descricao=f'{len(associados)} associado(s) em {formato.upper()}',
+        detalhes=f'filtros: {filtros_usados}',
+        commit=True,
+    )
+
+    nome_arquivo = f"associados_{datetime.now().strftime('%Y%m%d_%H%M')}.{formato}"
+    response = make_response(conteudo)
+    response.headers['Content-Type'] = mimetype
+    response.headers['Content-Disposition'] = f'attachment; filename={nome_arquivo}'
+    return response
+
+
 @app.route('/exportar_ficha/<matricula>')
 @login_required
 def exportar_ficha(matricula):
@@ -782,7 +1282,8 @@ def exportar_ficha(matricula):
 
 CAMPOS_ASSOCIADO_AUDITAVEIS = [
     'nome', 'matricula', 'rg', 'cpf', 'telefone', 'telefone_whatsapp',
-    'endereco', 'data_nascimento', 'email', 'data_admissao', 'dependentes',
+    'endereco', 'data_nascimento', 'email', 'data_admissao',
+    'situacao', 'situacao_data', 'situacao_motivo',
 ]
 
 
@@ -806,43 +1307,32 @@ def editar(id):
     if request.method == 'POST':
         foto_anterior = associado.foto_perfil
         nova_foto_nome = None
+
+        dados, erros = _validar_dados_associado(request.form, associado_id=associado.id)
+        dependentes, erros_dep = _validar_dependentes(request.form, cpf_titular=dados.get('cpf'))
+        erros += erros_dep
+        if erros:
+            for erro in erros:
+                flash(erro, 'danger')
+            return redirect(url_for('editar', id=id))
+
         try:
-            cpf_raw = request.form['cpf'].strip()
-            if not validar_cpf(cpf_raw):
-                flash('O CPF digitado é matematicamente inválido.', 'danger')
-                return redirect(url_for('editar', id=id))
-
-            cpf_formatado = _normalizar_cpf(cpf_raw)
-
             antes = {c: getattr(associado, c) for c in CAMPOS_ASSOCIADO_AUDITAVEIS}
-
-            associado.nome = request.form['nome'].strip()
-            associado.matricula = request.form['matricula'].strip()
-            associado.rg = request.form['rg'].strip()
-            associado.cpf = cpf_formatado
-            associado.telefone = request.form.get('telefone', '').strip()
-            associado.telefone_whatsapp = request.form.get('telefone_whatsapp', '').strip()
-            associado.endereco = request.form['endereco'].strip()
-
-            try:
-                associado.data_nascimento = datetime.strptime(request.form['data_nascimento'], '%Y-%m-%d').date()
-                associado.data_admissao = datetime.strptime(request.form['data_admissao'], '%Y-%m-%d').date()
-            except ValueError:
-                db.session.rollback()
-                flash('Data de nascimento ou admissão inválida. Use o formato correto.', 'danger')
-                return redirect(url_for('editar', id=id))
-
-            associado.email = request.form['email'].strip()
-            associado.dependentes = request.form.get('dependentes', '').strip()
+            dependentes_antes = _resumo_dependentes(associado.dependentes)
+            for campo, valor in dados.items():
+                setattr(associado, campo, valor)
+            associado.dependentes = [Dependente(**d) for d in dependentes]
 
             foto = request.files.get('foto_perfil')
             if foto and foto.filename and allowed_file(foto.filename):
                 dados_foto = foto.read()
                 if len(dados_foto) > MAX_FOTO_BYTES:
                     flash('A foto é muito grande (máximo 6 MB).', 'danger')
+                    db.session.rollback()
                     return redirect(url_for('editar', id=id))
                 if not _bytes_sao_imagem_png_ou_jpeg(dados_foto):
                     flash('Arquivo de foto inválido. Use apenas PNG ou JPEG.', 'danger')
+                    db.session.rollback()
                     return redirect(url_for('editar', id=id))
 
                 extensao = foto.filename.rsplit('.', 1)[1].lower()
@@ -853,6 +1343,10 @@ def editar(id):
                 associado.foto_perfil = nova_foto_nome
 
             detalhes = _diff_associado(antes, associado, foto_alterada=bool(nova_foto_nome))
+            dependentes_depois = _resumo_dependentes(associado.dependentes)
+            if dependentes_depois != dependentes_antes:
+                linha = f'dependentes: "{dependentes_antes}" → "{dependentes_depois}"'
+                detalhes = linha if detalhes == '(nenhum campo alterado)' else f'{detalhes}\n{linha}'
             registrar_auditoria(
                 ACAO_ASSOCIADO_EDITAR,
                 entidade='associado',
@@ -875,13 +1369,13 @@ def editar(id):
             app.logger.exception('Erro ao atualizar associado id=%s', id)
             if nova_foto_nome:
                 _remover_foto_do_disco(nova_foto_nome)
-            flash('Erro ao atualizar. Verifique se o novo CPF ou Matrícula já existem no sistema.', 'danger')
+            flash('Erro inesperado ao atualizar. Tente novamente ou consulte o log do servidor.', 'danger')
 
     return render_template('editar.html', username=session.get('username'), associado=associado)
 
 
 @app.route('/excluir/<int:id>', methods=['POST'])
-@login_required
+@admin_required
 def excluir(id):
     associado = Associado.query.get_or_404(id)
     foto_para_remover = associado.foto_perfil
@@ -943,6 +1437,7 @@ def perfil():
                 flash('A nova senha não pode ser igual à atual.', 'warning')
                 return redirect(url_for('perfil'))
             usuario.set_senha(nova_senha)
+            usuario.trocar_senha = False
             senha_alterada = True
 
         # Aplica mudança de username somente após passar todas as validações.
@@ -980,6 +1475,10 @@ def seguranca():
         senha_atual = request.form['senha_atual']
         nova_palavra = request.form['nova_palavra'].strip()
 
+        if not nova_palavra:
+            flash('A frase de segurança não pode ficar em branco.', 'danger')
+            return redirect(url_for('seguranca'))
+
         if not usuario.check_senha(senha_atual):
             flash('Senha atual incorreta.', 'danger')
             return redirect(url_for('seguranca'))
@@ -1006,14 +1505,20 @@ def listar_todos():
     except ValueError:
         page = 1
 
-    paginacao = Associado.query.order_by(Associado.nome).paginate(
-        page=page, per_page=PAGINA_TAMANHO, error_out=False
-    )
+    situacao = request.args.get('situacao', '').strip()
+    if situacao not in SITUACOES_ROTULOS:
+        situacao = ''
+
+    query = Associado.query.order_by(Associado.nome)
+    if situacao:
+        query = query.filter(Associado.situacao == situacao)
+    paginacao = query.paginate(page=page, per_page=PAGINA_TAMANHO, error_out=False)
     return render_template(
         'listar.html',
         username=session.get('username'),
         associados=paginacao.items,
         paginacao=paginacao,
+        situacao=situacao,
     )
 
 
@@ -1056,6 +1561,8 @@ def criar_usuario():
 
         novo = Usuario(username=novo_username, role=role)
         novo.set_senha(senha)
+        # Padrão: quem cria a conta conhece a senha, então o usuário troca no primeiro acesso.
+        novo.trocar_senha = request.form.get('trocar_senha') == '1'
         novo.set_palavra_recuperacao(palavra)
 
         try:
@@ -1083,6 +1590,137 @@ def criar_usuario():
     return render_template('usuario_novo.html', username=session.get('username'))
 
 
+def _usuario_admin_ativo_unico(usuario):
+    """True se `usuario` é o único administrador ativo (não pode perder o acesso de admin)."""
+    if usuario.role != ROLE_ADMIN or not usuario.ativo:
+        return False
+    return Usuario.query.filter_by(role=ROLE_ADMIN, ativo=True).count() <= 1
+
+
+@app.route('/usuarios/<int:id>/editar', methods=['GET', 'POST'])
+@admin_required
+def editar_usuario(id):
+    usuario = db.session.get(Usuario, id)
+    if not usuario:
+        flash('Usuário não encontrado.', 'danger')
+        return redirect(url_for('listar_usuarios'))
+    eh_voce = usuario.id == session.get('usuario_id')
+
+    if request.method == 'POST':
+        if eh_voce:
+            flash('Você não pode alterar o próprio perfil ou acesso. Peça a outro administrador.', 'warning')
+            return redirect(url_for('editar_usuario', id=id))
+
+        role = request.form.get('role', '').strip()
+        ativo = request.form.get('ativo') == '1'
+        if role not in ROLES_VALIDAS:
+            flash('Perfil inválido.', 'danger')
+            return redirect(url_for('editar_usuario', id=id))
+        if _usuario_admin_ativo_unico(usuario) and (role != ROLE_ADMIN or not ativo):
+            flash('Este é o único administrador ativo: não pode ser rebaixado nem desativado.', 'warning')
+            return redirect(url_for('editar_usuario', id=id))
+
+        mudancas = []
+        if usuario.role != role:
+            mudancas.append(f'perfil: "{usuario.role}" → "{role}"')
+            usuario.role = role
+        if usuario.ativo != ativo:
+            mudancas.append('acesso: ' + ('reativado' if ativo else 'desativado'))
+            usuario.ativo = ativo
+        if not mudancas:
+            flash('Nenhuma alteração para salvar.', 'info')
+            return redirect(url_for('listar_usuarios'))
+
+        registrar_auditoria(
+            ACAO_USUARIO_EDITAR,
+            entidade='usuario',
+            entidade_id=usuario.id,
+            descricao=f'{usuario.username}',
+            detalhes='\n'.join(mudancas),
+        )
+        db.session.commit()
+        app.logger.info('Usuário %s editado por %s: %s', usuario.username, session.get('username'), mudancas)
+        flash(f'Usuário "{usuario.username}" atualizado.', 'success')
+        return redirect(url_for('listar_usuarios'))
+
+    return render_template(
+        'usuario_editar.html',
+        username=session.get('username'),
+        usuario=usuario,
+        eh_voce=eh_voce,
+        unico_admin=_usuario_admin_ativo_unico(usuario),
+    )
+
+
+@app.route('/usuarios/<int:id>/redefinir_senha', methods=['POST'])
+@admin_required
+def redefinir_senha_usuario(id):
+    usuario = db.session.get(Usuario, id)
+    if not usuario:
+        flash('Usuário não encontrado.', 'danger')
+        return redirect(url_for('listar_usuarios'))
+    if usuario.id == session.get('usuario_id'):
+        flash('Para trocar a sua própria senha, use "Meu perfil".', 'warning')
+        return redirect(url_for('editar_usuario', id=id))
+
+    senha = request.form.get('senha_provisoria', '')
+    if len(senha) < 8:
+        flash('A senha provisória deve ter no mínimo 8 caracteres.', 'danger')
+        return redirect(url_for('editar_usuario', id=id))
+    if senha != request.form.get('senha_provisoria_confirmacao', ''):
+        flash('A confirmação não confere com a senha provisória.', 'danger')
+        return redirect(url_for('editar_usuario', id=id))
+
+    usuario.set_senha(senha)
+    usuario.trocar_senha = True
+    registrar_auditoria(
+        ACAO_USUARIO_SENHA_REDEFINIDA,
+        entidade='usuario',
+        entidade_id=usuario.id,
+        descricao=f'Senha provisória definida para {usuario.username}',
+    )
+    db.session.commit()
+    app.logger.info('Senha de %s redefinida por %s', usuario.username, session.get('username'))
+    flash(
+        f'Senha provisória definida para "{usuario.username}". Informe-a pessoalmente; '
+        'no próximo acesso será obrigatório criar uma senha nova.',
+        'success',
+    )
+    return redirect(url_for('listar_usuarios'))
+
+
+@app.route('/trocar_senha', methods=['GET', 'POST'])
+@login_required
+def trocar_senha():
+    """Troca obrigatória da senha provisória (definida por um admin ou na criação da conta)."""
+    usuario = db.session.get(Usuario, session['usuario_id'])
+    if not usuario.trocar_senha:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        nova = request.form.get('nova_senha', '')
+        if len(nova) < 8:
+            flash('A nova senha deve ter no mínimo 8 caracteres.', 'danger')
+        elif nova != request.form.get('confirmacao', ''):
+            flash('A confirmação não confere com a nova senha.', 'danger')
+        elif usuario.check_senha(nova):
+            flash('A nova senha não pode ser igual à senha provisória.', 'warning')
+        else:
+            usuario.set_senha(nova)
+            usuario.trocar_senha = False
+            registrar_auditoria(
+                ACAO_USUARIO_SENHA_TROCADA,
+                entidade='usuario',
+                entidade_id=usuario.id,
+                descricao=f'{usuario.username} criou a própria senha',
+            )
+            db.session.commit()
+            flash('Senha criada com sucesso. Bem-vindo!', 'success')
+            return redirect(url_for('dashboard'))
+
+    return render_template('trocar_senha.html', username=session.get('username'))
+
+
 @app.route('/usuarios/<int:id>/excluir', methods=['POST'])
 @admin_required
 def excluir_usuario(id):
@@ -1097,8 +1735,7 @@ def excluir_usuario(id):
 
     # Impede remover o último administrador do sistema.
     if usuario.role == ROLE_ADMIN:
-        total_admins = Usuario.query.filter_by(role=ROLE_ADMIN).count()
-        if total_admins <= 1:
+        if _usuario_admin_ativo_unico(usuario) or Usuario.query.filter_by(role=ROLE_ADMIN).count() <= 1:
             flash('Não é possível excluir o último administrador do sistema.', 'warning')
             return redirect(url_for('listar_usuarios'))
 
@@ -1184,10 +1821,32 @@ def auditoria():
 @app.route('/exportar_lista_simples', methods=['POST'])
 @login_required
 def exportar_lista_simples():
-    associados = Associado.query.order_by(Associado.nome).all()
+    situacao = request.form.get('situacao', '').strip()
+    if situacao not in SITUACOES_ROTULOS:
+        situacao = ''
+    query = Associado.query.order_by(Associado.nome)
+    if situacao:
+        query = query.filter(Associado.situacao == situacao)
+
+    max_linhas = _exportar_lista_simples_max()
+    total = query.count()
+    if total > max_linhas:
+        flash(
+            f'A lista teria {total} associados, acima do limite configurado de {max_linhas}. '
+            f'Use a busca com filtros ou aumente EXPORTAR_LISTA_SIMPLES_MAX no ambiente — com cuidado.',
+            'warning',
+        )
+        return redirect(url_for('listar_todos', situacao=situacao or None))
+
+    associados = query.all()
     data_geracao = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
-    html_renderizado = render_template('pdf_lista_simples.html', associados=associados, now=data_geracao)
+    html_renderizado = render_template(
+        'pdf_lista_simples.html',
+        associados=associados,
+        now=data_geracao,
+        situacao_rotulo=SITUACOES_ROTULOS.get(situacao),
+    )
 
     pdf = HTML(string=html_renderizado, base_url=request.url_root).write_pdf()
 
@@ -1357,6 +2016,9 @@ def admin_restore():
             db.session.remove()
             if db.engine is not None:
                 db.engine.dispose()
+
+            # Um backup antigo pode não ter as colunas acrescentadas depois.
+            _garantir_schema()
 
             registrar_auditoria(
                 ACAO_SISTEMA_RESTORE,

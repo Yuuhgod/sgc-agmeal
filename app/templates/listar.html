@@ -1,26 +1,39 @@
 {% extends "base.html" %}
+{% from "_macros.html" import selo_situacao, botoes_planilha %}
 
 {% block title %}SGC - Lista de Associados{% endblock %}
 
 {% block content %}
 <div class="card shadow-sm border-0 mb-4">
     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3" style="color: var(--agmeal-azul);">
-        <span><i class="fa-solid fa-users me-2"></i>Todos os Associados (Ordem Alfabética)</span>
+        <span><i class="fa-solid fa-users me-2"></i>{% if situacao %}Associados — {{ situacoes[situacao] }}{% else %}Todos os Associados{% endif %} (Ordem Alfabética)</span>
 
         {% if paginacao and paginacao.total > 0 %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+        {{ botoes_planilha({'situacao': situacao}) }}
         <form action="{{ url_for('exportar_lista_simples') }}" method="POST" target="_blank" class="d-inline form-submit-loading" data-loading-label="Gerando PDF…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <button type="submit" class="btn btn-sm btn-ouro" title="Gera um ficheiro PDF com todos os associados ({{ paginacao.total }} no total), não só os desta página. Pode demorar vários segundos.">
-                <i class="fa-solid fa-file-pdf me-2"></i>PDF com todos os associados ({{ paginacao.total }})
+            <input type="hidden" name="situacao" value="{{ situacao }}">
+            <button type="submit" class="btn btn-sm btn-ouro" title="Gera um ficheiro PDF com todos os associados desta lista ({{ paginacao.total }} no total), não só os desta página. Pode demorar vários segundos.">
+                <i class="fa-solid fa-file-pdf me-2"></i>PDF da lista ({{ paginacao.total }})
             </button>
         </form>
+        </div>
         {% endif %}
+    </div>
+    <div class="border-top bg-white px-3 py-2">
+        <ul class="nav nav-pills nav-sm small">
+            <li class="nav-item"><a class="nav-link py-1 {% if not situacao %}active{% endif %}" href="{{ url_for('listar_todos') }}">Todos</a></li>
+            {% for valor, rotulo in situacoes.items() %}
+            <li class="nav-item"><a class="nav-link py-1 {% if situacao == valor %}active{% endif %}" href="{{ url_for('listar_todos', situacao=valor) }}">{{ rotulo }}</a></li>
+            {% endfor %}
+        </ul>
     </div>
     {% if paginacao and paginacao.total > 0 %}
     <div class="border-top bg-light px-3 py-2">
         <p class="small text-muted mb-0">
             <i class="fa-solid fa-circle-info me-1 text-primary"></i>
-            O ficheiro PDF inclui <strong>os {{ paginacao.total }} cadastros</strong> da base de dados, por ordem alfabética — independentemente da página que está a ver na tabela.
+            O PDF e as planilhas incluem <strong>os {{ paginacao.total }} cadastros</strong> desta lista, por ordem alfabética — independentemente da página que está a ver na tabela.
         </p>
     </div>
     {% endif %}
@@ -32,6 +45,7 @@
                         <th class="ps-4">Nome Completo</th>
                         <th>Matrícula</th>
                         <th>Telefone Principal</th>
+                        <th>Situação</th>
                         <th class="text-center pe-4">Ações</th>
                     </tr>
                 </thead>
@@ -41,15 +55,16 @@
                         <td class="ps-4"><strong>{{ pessoa.nome }}</strong></td>
                         <td>{{ pessoa.matricula }}</td>
                         <td>{{ pessoa.telefone or pessoa.telefone_whatsapp or 'Não informado' }}</td>
+                        <td>{{ selo_situacao(pessoa) }}</td>
                         <td class="text-center pe-4">
                             <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-outline-primary" title="Editar" aria-label="Editar associado"><i class="fa-solid fa-pen"></i></a>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="4" class="text-center py-5 text-muted">
+                        <td colspan="5" class="text-center py-5 text-muted">
                             <i class="fa-solid fa-users-slash fa-3x mb-3 opacity-25"></i><br>
-                            Nenhum associado cadastrado ainda.
+                            {% if situacao %}Nenhum associado com esta situação.{% else %}Nenhum associado cadastrado ainda.{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -67,19 +82,19 @@
         <nav aria-label="Paginação">
             <ul class="pagination pagination-sm mb-0">
                 <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
-                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.prev_num) if paginacao.has_prev else '#' }}">Anterior</a>
+                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.prev_num, situacao=situacao or None) if paginacao.has_prev else '#' }}">Anterior</a>
                 </li>
                 {% for p in paginacao.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
                     {% if p %}
                         <li class="page-item {% if p == paginacao.page %}active{% endif %}">
-                            <a class="page-link" href="{{ url_for('listar_todos', page=p) }}">{{ p }}</a>
+                            <a class="page-link" href="{{ url_for('listar_todos', page=p, situacao=situacao or None) }}">{{ p }}</a>
                         </li>
                     {% else %}
                         <li class="page-item disabled"><span class="page-link">…</span></li>
                     {% endif %}
                 {% endfor %}
                 <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
-                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.next_num) if paginacao.has_next else '#' }}">Próxima</a>
+                    <a class="page-link" href="{{ url_for('listar_todos', page=paginacao.next_num, situacao=situacao or None) if paginacao.has_next else '#' }}">Próxima</a>
                 </li>
             </ul>
         </nav>

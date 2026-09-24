@@ -121,7 +121,30 @@
                 <td colspan="2"><div class="campo"><strong>Endereço:</strong><br>{{ pessoa.endereco }}</div></td>
             </tr>
             <tr>
-                <td colspan="2"><div class="campo"><strong>Dependentes:</strong><br>{{ pessoa.dependentes or 'Nenhum informado' }}</div></td>
+                <td colspan="2"><div class="campo"><strong>Dependentes:</strong>
+                {% if pessoa.dependentes %}
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 11px;">
+                        <tr style="background: #eef2f8;">
+                            <th style="text-align: left; padding: 3px 5px;">Nome</th>
+                            <th style="text-align: left; padding: 3px 5px;">Parentesco</th>
+                            <th style="text-align: left; padding: 3px 5px;">Nascimento</th>
+                            <th style="text-align: left; padding: 3px 5px;">CPF</th>
+                        </tr>
+                        {% for d in pessoa.dependentes %}
+                        <tr>
+                            <td style="padding: 3px 5px; border-top: 1px solid #ddd;">{{ d.nome }}</td>
+                            <td style="padding: 3px 5px; border-top: 1px solid #ddd;">{{ d.parentesco }}</td>
+                            <td style="padding: 3px 5px; border-top: 1px solid #ddd;">{{ d.data_nascimento.strftime('%d/%m/%Y') if d.data_nascimento else '—' }}</td>
+                            <td style="padding: 3px 5px; border-top: 1px solid #ddd;">{{ d.cpf or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                {% else %}<br>Nenhum informado{% endif %}
+                </div></td>
+            </tr>
+            <tr>
+                <td><div class="campo"><strong>Situação:</strong><br>{{ pessoa.situacao_rotulo }}{% if pessoa.situacao_data %} desde {{ pessoa.situacao_data.strftime('%d/%m/%Y') }}{% endif %}</div></td>
+                <td><div class="campo"><strong>Motivo:</strong><br>{{ pessoa.situacao_motivo or '—' }}</div></td>
             </tr>
         </table>
         

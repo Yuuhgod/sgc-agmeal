@@ -89,9 +89,54 @@
         });
     }
 
+    /**
+     * Editor de dependentes (`[data-editor-dependentes]`): adiciona linhas a partir do
+     * <template> e remove a linha do botão clicado.
+     */
+    function initEditorDependentes() {
+        document.querySelectorAll("[data-editor-dependentes]").forEach(function (editor) {
+            var lista = editor.querySelector("[data-lista-dependentes]");
+            var modelo = editor.querySelector("template[data-modelo-dependente]");
+            var vazio = editor.querySelector("[data-sem-dependentes]");
+            function atualizarVazio() {
+                if (vazio) vazio.hidden = lista.children.length > 0;
+            }
+            editor.querySelector("[data-adicionar-dependente]").addEventListener("click", function () {
+                lista.appendChild(modelo.content.cloneNode(true));
+                var linhas = lista.querySelectorAll(".linha-dependente");
+                linhas[linhas.length - 1].querySelector('input[name="dep_nome"]').focus();
+                atualizarVazio();
+            });
+            lista.addEventListener("click", function (ev) {
+                var botao = ev.target.closest("[data-remover-dependente]");
+                if (!botao) return;
+                botao.closest(".linha-dependente").remove();
+                atualizarVazio();
+            });
+            atualizarVazio();
+        });
+    }
+
+    /**
+     * Formulários com `data-confirmar="mensagem"` pedem confirmação antes de enviar.
+     * (A mensagem vem escapada pelo Jinja no atributo; sem JS inline com aspas frágeis.)
+     */
+    function initConfirmacoes() {
+        document.addEventListener("submit", function (ev) {
+            var form = ev.target;
+            var msg = form.getAttribute && form.getAttribute("data-confirmar");
+            if (msg && !window.confirm(msg)) {
+                ev.preventDefault();
+                ev.stopImmediatePropagation();
+            }
+        }, true);
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         autoFecharAlertas();
         initFormSubmitLoading();
         initPdfLinkLoading();
+        initEditorDependentes();
+        initConfirmacoes();
     });
 })();

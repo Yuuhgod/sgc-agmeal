@@ -82,3 +82,46 @@ a .card:hover, .card.hover-effect:hover {
 .table-hover tbody tr:hover {
     background-color: rgba(212, 175, 55, 0.05);
 }
+/* ---------- Painel: aniversariantes ---------- */
+.aniversariantes { max-height: 360px; overflow-y: auto; }
+.dia-aniversario {
+    min-width: 2.4rem; text-align: center; font-weight: 700;
+    color: var(--agmeal-azul); background: #eef2f8; border-radius: 6px; padding: .3rem 0;
+}
+.aniversario-hoje { background: #fff8e1; }
+.aniversario-hoje .dia-aniversario { background: var(--agmeal-ouro); color: #1a1a1a; }
+
+/* ---------- Painel: gráfico de barras (uma série, sem biblioteca) ---------- */
+.grafico-barras { --grafico-altura: 200px; }
+.grafico-area {
+    height: var(--grafico-altura); display: flex; align-items: flex-end; gap: 6px;
+    border-bottom: 1px solid #c9ced6;           /* linha de base discreta */
+    background-image: linear-gradient(#eceff3 1px, transparent 1px);
+    background-size: 100% 25%;                  /* grade recessiva a cada 25% */
+    padding-top: 1.4rem;
+}
+.grafico-coluna {
+    flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end;
+    align-items: center; position: relative; cursor: default; outline: none;
+}
+.grafico-barra {
+    width: min(70%, 36px); background: var(--agmeal-azul-claro);
+    border-radius: 4px 4px 0 0;                 /* ponta arredondada, base ancorada */
+    min-height: 0; transition: background-color .15s;
+}
+.grafico-coluna:hover .grafico-barra,
+.grafico-coluna:focus-visible .grafico-barra { background: var(--agmeal-azul); }
+.grafico-valor { font-size: .75rem; font-weight: 600; color: #333; margin-bottom: 2px; }
+.grafico-coluna[data-dica]:hover::after,
+.grafico-coluna[data-dica]:focus-visible::after {
+    content: attr(data-dica); position: absolute; bottom: calc(100% + 4px); left: 50%;
+    transform: translateX(-50%); white-space: nowrap; z-index: 2;
+    background: #1f2937; color: #fff; font-size: .75rem; padding: 3px 8px; border-radius: 4px;
+    pointer-events: none;
+}
+.grafico-eixo { display: flex; gap: 6px; margin-top: 4px; }
+.grafico-eixo span { flex: 1; text-align: center; font-size: .72rem; color: #6c757d; }
+@media (max-width: 576px) {
+    .grafico-eixo span { font-size: .6rem; }
+    .grafico-area, .grafico-eixo { gap: 2px; }
+}

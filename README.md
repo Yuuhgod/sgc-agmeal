@@ -8,9 +8,15 @@ quem quiser empacotar o mesmo código noutro ambiente.
 
 ## Funcionalidades
 - **Autenticação:** login com setup guiado de primeira execução e rate limiting.
+- **Gestão de usuários (admin):** criar, editar perfil (admin/usuário), desativar/reativar (bloqueia o acesso na hora, preservando o histórico), redefinir senha com senha provisória e excluir. Contas novas e senhas redefinidas obrigam o usuário a criar a própria senha no primeiro acesso. O sistema nunca fica sem um administrador ativo.
+- **Sessão:** encerrada após `SESSAO_INATIVIDADE_MINUTOS` sem uso (padrão 30) e revalidada no banco a cada acesso.
 - **Recuperação de Acesso:** fluxo de redefinição de senha via Frase de Segurança.
-- **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão e listagem paginada.
+- **Gestão de Associados (CRUD):** cadastro, busca, edição, exclusão (apenas administradores) e listagem paginada, com validação de campos obrigatórios, datas, e-mail e duplicidade de CPF/matrícula.
 - **Fotos 3x4:** upload com crop client-side (Cropper.js), validação de tipo/tamanho no servidor e limpeza automática de fotos órfãs.
+- **Situação cadastral:** cada associado é *Ativo*, *Inativo* ou *Desligado*, com data e motivo. Inativar/desligar preserva o cadastro e o histórico (preferível a excluir). Filtros por situação na busca e na lista; o painel mostra os ativos e o total por situação.
+- **Dependentes:** cadastrados em tabela própria (nome, parentesco, nascimento e CPF opcionais), com linhas adicionáveis no cadastro/edição; aparecem na ficha PDF e numa aba própria da planilha Excel. A lista antiga em texto ("Maria, João") é convertida automaticamente uma única vez ao atualizar, com parentesco *Não informado*; o texto original fica guardado no banco como cópia de segurança.
+- **Painel:** aniversariantes do mês (ativos), gráfico de admissões por ano (últimos 10 anos) e contagem por situação.
+- **Planilhas:** exportação em **Excel (.xlsx)** e **CSV** (separado por `;`, abre direto no Excel em português) com os mesmos filtros da busca/lista. Cada exportação fica registrada na auditoria (quem, quantos registros e com quais filtros).
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
 - **Restaurar (admin):** upload de ZIP com confirmações explícitas (texto + caixa) e backup de segurança automático antes de substituir dados; ver secção *Restauração* abaixo.
@@ -20,7 +26,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Backend:** Python 3.12, Flask 3, SQLAlchemy, Flask-Migrate (Alembic), Flask-WTF, Flask-Limiter.
 - **Servidor:** Gunicorn (com `ProxyFix` no Flask se estiver atrás de um proxy).
 - **Banco:** SQLite em volume local (`data/sgc.db`).
-- **Frontend:** HTML5, CSS3, Bootstrap 5, Cropper.js.
+- **Frontend:** HTML5, CSS3, Bootstrap 5.3.2, Font Awesome 6.4.2 e Cropper.js 1.6.1 — servidos localmente a partir de `app/static/vendor/` (a interface funciona **sem acesso à internet**). Para atualizar uma biblioteca, substitua a pasta pela nova versão (o nome da pasta inclui a versão, o que permite cache longo no navegador) e ajuste os caminhos nos templates.
 - **Infra (opcional):** ficheiros Docker Compose e Nginx no repositório para quem preferir esse modelo de deploy.
 
 ## Como Executar
@@ -77,6 +83,8 @@ bash start.sh      # inicia o servidor
 ### Variáveis de Ambiente Suportadas
 | Variável | Padrão | Descrição |
 |---|---|---|
+| `SGC_DATA_DIR` | `data/` na raiz do projeto | Pasta com o banco, backups e segredo de sessão. Os testes usam uma pasta temporária por aqui. |
+| `SESSAO_INATIVIDADE_MINUTOS` | `30` | Minutos sem uso até a sessão expirar (o limite absoluto continua 8 horas). |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
@@ -87,6 +95,9 @@ bash start.sh      # inicia o servidor
 | `BACKUP_KEEP_SYNC` | `60` | Quantidade de ZIPs a manter na pasta `BACKUP_SYNC_DIR`. |
 | `MAX_CONTENT_LENGTH_MB` | `128` | Limite máximo de upload (útil para restaurar ZIPs grandes). |
 | `EXPORTAR_PDF_MAX_SEM_FILTRO` | `400` | Máximo de associados permitidos ao exportar PDF na **busca** sem nenhum filtro; acima disto é pedido um filtro ou use a página **Listar**. |
+| `EXPORTAR_LISTA_SIMPLES_MAX` | `5000` | Máximo de associados na **lista simples** em PDF (página **Listar**); acima disto a exportação é recusada. |
+| `LOGIN_MAX_FALHAS_IP` | `10` | Falhas de login (ou de recuperação de senha) por IP antes de bloquear temporariamente. |
+| `LOGIN_JANELA_MINUTOS` | `5` | Janela, em minutos, usada na contagem de falhas acima. |
 
 ### `data/.flask_secret` (permissões)
 
@@ -183,6 +194,11 @@ export FLASK_APP=main:app
 # Ex.: ../.venv/bin/flask db upgrade
 flask db upgrade
 ```
+
+As colunas e tabelas novas (ex.: situação do associado, dependentes) também são criadas **automaticamente ao
+iniciar o servidor** e após uma restauração de backup antigo, então instalações que
+não usam `flask db upgrade` continuam funcionando sem passo manual. As migrações são
+idempotentes: rodar `flask db upgrade` depois disso não causa erro.
 
 ### Integração contínua (GitHub Actions)
 

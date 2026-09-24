@@ -33,6 +33,11 @@ class Usuario(db.Model):
     # Papel: 'admin' (gerencia usuários) ou 'usuario' (acesso padrão).
     role = db.Column(db.String(20), nullable=False, default=ROLE_USUARIO)
 
+    # Conta desativada não entra no sistema, mas o usuário e o histórico são preservados.
+    ativo = db.Column(db.Boolean, nullable=False, default=True, server_default='1')
+    # Senha provisória (definida por um admin ou na criação): obriga a troca no próximo acesso.
+    trocar_senha = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+
     @property
     def is_admin(self):
         return self.role == ROLE_ADMIN
@@ -61,6 +66,16 @@ class Usuario(db.Model):
                 self.set_palavra_recuperacao(palavra_plain)
 
 
+SITUACAO_ATIVO = 'ativo'
+SITUACAO_INATIVO = 'inativo'
+SITUACAO_DESLIGADO = 'desligado'
+SITUACOES_ROTULOS = {
+    SITUACAO_ATIVO: 'Ativo',
+    SITUACAO_INATIVO: 'Inativo',
+    SITUACAO_DESLIGADO: 'Desligado',
+}
+
+
 class Associado(db.Model):
     __tablename__ = 'associados'
 
@@ -76,8 +91,62 @@ class Associado(db.Model):
     data_nascimento = db.Column(db.Date, nullable=False)
     email = db.Column(db.String(100), nullable=False)
     data_admissao = db.Column(db.Date, nullable=False)
-    dependentes = db.Column(db.Text, nullable=True)
+    # Texto livre da versão antiga ("Maria, João"). Convertido uma vez para a tabela de
+    # dependentes na inicialização e mantido só como cópia de segurança (não é mais editado).
+    dependentes_texto_legado = db.Column('dependentes', db.Text, nullable=True)
     data_criacao = db.Column(db.DateTime, default=_agora_utc)
+
+    # Situação cadastral: desligar/inativar preserva o histórico (em vez de excluir).
+    situacao = db.Column(
+        db.String(20), nullable=False, default=SITUACAO_ATIVO,
+        server_default=SITUACAO_ATIVO, index=True,
+    )
+    situacao_data = db.Column(db.Date, nullable=True)
+    situacao_motivo = db.Column(db.String(200), nullable=True)
+
+    dependentes = db.relationship(
+        'Dependente',
+        backref='titular',
+        cascade='all, delete-orphan',
+        order_by='Dependente.nome',
+    )
+
+    @property
+    def situacao_rotulo(self):
+        return SITUACOES_ROTULOS.get(self.situacao, self.situacao)
+
+    @property
+    def dependentes_resumo(self):
+        """Texto curto para tabelas/planilhas: "Maria (Filho(a)); João (Cônjuge)"."""
+        return '; '.join(f'{d.nome} ({d.parentesco})' for d in self.dependentes)
+
+
+PARENTESCO_NAO_INFORMADO = 'Não informado'
+PARENTESCOS = (
+    'Cônjuge', 'Companheiro(a)', 'Filho(a)', 'Enteado(a)', 'Pai', 'Mãe',
+    'Irmão(ã)', 'Neto(a)', 'Outro', PARENTESCO_NAO_INFORMADO,
+)
+
+
+class Dependente(db.Model):
+    __tablename__ = 'dependentes_associado'
+
+    id = db.Column(db.Integer, primary_key=True)
+    associado_id = db.Column(
+        db.Integer, db.ForeignKey('associados.id', ondelete='CASCADE'), nullable=False, index=True,
+    )
+    nome = db.Column(db.String(100), nullable=False)
+    parentesco = db.Column(db.String(30), nullable=False, default=PARENTESCO_NAO_INFORMADO)
+    data_nascimento = db.Column(db.Date, nullable=True)
+    cpf = db.Column(db.String(14), nullable=True)
+
+    def resumo(self):
+        partes = [self.parentesco]
+        if self.data_nascimento:
+            partes.append(f'nasc. {self.data_nascimento.strftime("%d/%m/%Y")}')
+        if self.cpf:
+            partes.append(f'CPF {self.cpf}')
+        return f'{self.nome} ({", ".join(partes)})'
 
 
 # Tipos de ações registradas na trilha de auditoria.
@@ -88,9 +157,15 @@ ACAO_USUARIO_CRIAR = 'usuario.criar'
 ACAO_USUARIO_EXCLUIR = 'usuario.excluir'
 ACAO_USUARIO_PERFIL = 'usuario.perfil_alterado'
 ACAO_USUARIO_PALAVRA = 'usuario.palavra_alterada'
+ACAO_USUARIO_EDITAR = 'usuario.editado'
+ACAO_USUARIO_SENHA_REDEFINIDA = 'usuario.senha_redefinida'
+ACAO_USUARIO_SENHA_TROCADA = 'usuario.senha_trocada'
 ACAO_AUTH_LOGIN = 'auth.login'
 ACAO_AUTH_LOGOUT = 'auth.logout'
 ACAO_AUTH_LOGIN_FALHOU = 'auth.login_falhou'
+ACAO_AUTH_RECUPERACAO = 'auth.senha_recuperada'
+ACAO_AUTH_RECUPERACAO_FALHOU = 'auth.recuperacao_falhou'
+ACAO_ASSOCIADO_EXPORTAR = 'associado.exportar'
 ACAO_SISTEMA_BACKUP = 'sistema.backup'
 ACAO_SISTEMA_RESTORE = 'sistema.restore'
 
@@ -102,9 +177,15 @@ ACOES_ROTULOS = {
     ACAO_USUARIO_EXCLUIR: 'Excluiu usuário',
     ACAO_USUARIO_PERFIL: 'Alterou perfil próprio',
     ACAO_USUARIO_PALAVRA: 'Alterou frase de segurança',
+    ACAO_USUARIO_EDITAR: 'Editou usuário (perfil/acesso)',
+    ACAO_USUARIO_SENHA_REDEFINIDA: 'Redefiniu senha de outro usuário',
+    ACAO_USUARIO_SENHA_TROCADA: 'Trocou a senha provisória',
     ACAO_AUTH_LOGIN: 'Entrou no sistema',
     ACAO_AUTH_LOGOUT: 'Saiu do sistema',
     ACAO_AUTH_LOGIN_FALHOU: 'Tentativa de login (falhou)',
+    ACAO_AUTH_RECUPERACAO: 'Redefiniu a senha pela frase de segurança',
+    ACAO_AUTH_RECUPERACAO_FALHOU: 'Tentativa de recuperação de senha (falhou)',
+    ACAO_ASSOCIADO_EXPORTAR: 'Exportou planilha de associados',
     ACAO_SISTEMA_BACKUP: 'Gerou backup do sistema',
     ACAO_SISTEMA_RESTORE: 'Restaurou backup (substituiu dados)',
 }

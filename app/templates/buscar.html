@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import selo_situacao, botoes_planilha %}
 
 {% block title %}SGC - Buscar Registros{% endblock %}
 
@@ -13,17 +14,26 @@
             <div class="row align-items-end">
                 <div class="col-md-4 mb-3">
                     <label class="form-label fw-bold text-muted small">Nome do Associado</label>
-                    <input type="text" class="form-control" name="nome" placeholder="Parte do nome...">
+                    <input type="text" class="form-control" name="nome" placeholder="Parte do nome..." value="{{ filtros.nome }}">
                 </div>
-                <div class="col-md-3 mb-3">
+                <div class="col-md-2 mb-3">
                     <label class="form-label fw-bold text-muted small">Matrícula</label>
-                    <input type="text" class="form-control" name="matricula" placeholder="Exata...">
+                    <input type="text" class="form-control" name="matricula" placeholder="Exata..." value="{{ filtros.matricula }}">
                 </div>
                 <div class="col-md-2 mb-3">
                     <label class="form-label fw-bold text-muted small">Ano de Admissão</label>
-                    <input type="number" class="form-control" name="ano" placeholder="Ex: 2022">
+                    <input type="number" class="form-control" name="ano" placeholder="Ex: 2022" value="{{ filtros.ano }}">
                 </div>
-                <div class="col-md-3 mb-3 d-grid">
+                <div class="col-md-2 mb-3">
+                    <label class="form-label fw-bold text-muted small">Situação</label>
+                    <select class="form-select" name="situacao">
+                        <option value="">Todas</option>
+                        {% for valor, rotulo in situacoes.items() %}
+                        <option value="{{ valor }}" {% if filtros.situacao == valor %}selected{% endif %}>{{ rotulo }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 mb-3 d-grid">
                     <button type="submit" class="btn btn-primary-agmeal fw-bold"><i class="fa-solid fa-search me-2"></i>Pesquisar</button>
                 </div>
             </div>
@@ -37,7 +47,7 @@
     <div class="alert alert-warning border-0 rounded-0 mb-0 small py-3 no-auto-close">
         <strong><i class="fa-solid fa-triangle-exclamation me-1"></i>Exportação em PDF</strong>
         <p class="mb-0 mt-1">
-            Esta lista corresponde a uma pesquisa <strong>sem filtros</strong> (todos os {{ resultados|length }} associados).
+            Esta lista corresponde a uma pesquisa <strong>sem filtro de nome, matrícula ou ano</strong> ({{ resultados|length }} associados).
             O PDF pode demorar e sobrecarregar o servidor. Se aparecerem mais de
             <strong>{{ exportar_pdf_max_sem_filtro }}</strong> cadastros, o sistema
             <strong>não permite</strong> exportar sem pelo menos um filtro (nome, matrícula ou ano).
@@ -50,13 +60,16 @@
         <span><i class="fa-solid fa-list me-2"></i>Resultados Encontrados: {{ resultados|length }}</span>
         
         {% if resultados|length > 0 %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+        {{ botoes_planilha(filtros) }}
         <form action="{{ url_for('exportar_pdf') }}" method="POST" class="m-0 p-0 form-submit-loading" data-loading-label="Gerando PDF…" target="_blank">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <input type="hidden" name="nome_export" value="{{ request.form.get('nome', '') }}">
-            <input type="hidden" name="matricula_export" value="{{ request.form.get('matricula', '') }}">
-            <input type="hidden" name="ano_export" value="{{ request.form.get('ano', '') }}">
+            {% for campo, valor in filtros.items() %}
+            <input type="hidden" name="{{ campo }}_export" value="{{ valor }}">
+            {% endfor %}
             <button type="submit" class="btn btn-sm btn-ouro" title="Gera PDF com os mesmos registos desta tabela. Sem filtros na pesquisa, equivale a todos os cadastros (bloqueado acima de {{ exportar_pdf_max_sem_filtro }})."><i class="fa-solid fa-file-pdf me-2"></i>Exportar esta lista em PDF</button>
         </form>
+        </div>
         {% endif %}
     </div>
     <div class="card-body p-0">
@@ -68,6 +81,7 @@
                         <th>Nome Completo</th>
                         <th>CPF</th>
                         <th>Admissão</th>
+                        <th>Situação</th>
                         <th class="text-center pe-4">Ações</th>
                     </tr>
                 </thead>
@@ -78,20 +92,23 @@
                         <td>{{ pessoa.nome }}</td>
                         <td>{{ pessoa.cpf }}</td>
                         <td>{{ pessoa.data_admissao.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ selo_situacao(pessoa) }}</td>
                         <td class="text-center pe-4">
                             <div class="btn-group" role="group">
                                 <a href="{{ url_for('editar', id=pessoa.id) }}" class="btn btn-sm btn-primary-agmeal" title="Editar"><i class="fa-solid fa-pen"></i></a>
                                 <a href="{{ url_for('exportar_ficha', matricula=pessoa.matricula) }}" target="_blank" class="btn btn-sm btn-outline-secondary pdf-link-loading" data-loading-label="PDF…" title="Gerar ficha PDF (pode demorar alguns segundos)"><i class="fa-solid fa-file-pdf"></i></a>
-                                <form action="{{ url_for('excluir', id=pessoa.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');">
+                                {% if sessao_is_admin %}
+                                <form action="{{ url_for('excluir', id=pessoa.id) }}" method="POST" class="d-inline" data-confirmar="Excluir {{ pessoa.nome }} apaga o registro definitivamente.&#10;&#10;Para quem saiu da associação, prefira mudar a situação para Desligado (em Editar), que preserva o histórico.&#10;&#10;Excluir mesmo assim?">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-sm btn-danger" title="Excluir"><i class="fa-solid fa-trash"></i></button>
                                 </form>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="5" class="text-center py-5 text-muted">
+                        <td colspan="6" class="text-center py-5 text-muted">
                             <i class="fa-solid fa-inbox fa-3x mb-3 opacity-25"></i><br>
                             Nenhum associado encontrado com os filtros informados.
                         </td>
