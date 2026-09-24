@@ -2,6 +2,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 import segno
+from PIL import Image, ImageOps, UnidentifiedImageError
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from sqlalchemy import extract, inspect, text
 from sqlalchemy.orm import selectinload
@@ -1043,8 +1045,29 @@ def dashboard():
     )
 
 
+FOTO_MAX_DIMENSOES = (600, 800)  # 3x4; o recorte no navegador gera 300x400
+
+
+def _normalizar_foto(raw):
+    """Regrava a foto como JPEG de no máximo 600x800, girada conforme o EXIF.
+
+    Além de padronizar o tamanho (fotos de celular tinham vários MB e pesavam nos PDFs),
+    remove os metadados EXIF, que podem conter a localização GPS de onde a foto foi tirada."""
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img = ImageOps.exif_transpose(img)
+            img = img.convert('RGB')
+            img.thumbnail(FOTO_MAX_DIMENSOES)
+            saida = io.BytesIO()
+            img.save(saida, format='JPEG', quality=85, optimize=True)
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+        raise ValueError('Não foi possível ler a imagem. Use uma foto PNG ou JPEG.') from exc
+    return saida.getvalue()
+
+
 def _processar_foto_base64(foto_b64):
-    """Decodifica uma foto data-URL, valida e retorna (bytes, extensao). Retorna (None, None) se não houver foto."""
+    """Decodifica uma foto data-URL, valida e retorna (bytes JPEG normalizados, 'jpg').
+    Retorna (None, None) se não houver foto."""
     if not foto_b64:
         return None, None
     try:
@@ -1058,8 +1081,7 @@ def _processar_foto_base64(foto_b64):
     if not _bytes_sao_imagem_png_ou_jpeg(raw_foto):
         raise ValueError('Arquivo de foto inválido. Use apenas PNG ou JPEG.')
 
-    extensao = 'png' if 'image/png' in header else 'jpg'
-    return raw_foto, extensao
+    return _normalizar_foto(raw_foto), 'jpg'
 
 
 CAMPOS_ASSOCIADO_OBRIGATORIOS = {
@@ -2016,19 +2038,23 @@ def editar(id):
             if request.form.get('lgpd_form') == '1':  # só o formulário de edição traz a caixa
                 _aplicar_consentimento(associado, request.form.get('consentimento') == '1')
 
-            foto = request.files.get('foto_perfil')
-            if foto and foto.filename and allowed_file(foto.filename):
-                dados_foto = foto.read()
-                if len(dados_foto) > MAX_FOTO_BYTES:
-                    flash('A foto é muito grande (máximo 6 MB).', 'danger')
-                    db.session.rollback()
-                    return redirect(url_for('editar', id=id))
-                if not _bytes_sao_imagem_png_ou_jpeg(dados_foto):
-                    flash('Arquivo de foto inválido. Use apenas PNG ou JPEG.', 'danger')
-                    db.session.rollback()
-                    return redirect(url_for('editar', id=id))
+            # Foto recortada no navegador (base64) ou, sem JavaScript, o arquivo enviado.
+            try:
+                dados_foto, extensao = _processar_foto_base64(request.form.get('foto_base64'))
+                foto = request.files.get('foto_perfil')
+                if dados_foto is None and foto and foto.filename and allowed_file(foto.filename):
+                    bruto = foto.read()
+                    if len(bruto) > MAX_FOTO_BYTES:
+                        raise ValueError('A foto é muito grande (máximo 6 MB).')
+                    if not _bytes_sao_imagem_png_ou_jpeg(bruto):
+                        raise ValueError('Arquivo de foto inválido. Use apenas PNG ou JPEG.')
+                    dados_foto, extensao = _normalizar_foto(bruto), 'jpg'
+            except ValueError as exc:
+                flash(str(exc), 'danger')
+                db.session.rollback()
+                return redirect(url_for('editar', id=id))
 
-                extensao = foto.filename.rsplit('.', 1)[1].lower()
+            if dados_foto:
                 nova_foto_nome = _gerar_nome_foto(associado.matricula, extensao)
                 caminho_salvar = os.path.join(app.config['UPLOAD_FOLDER'], nova_foto_nome)
                 with open(caminho_salvar, 'wb') as fh:

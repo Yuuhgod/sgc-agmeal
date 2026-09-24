@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% from "_macros.html" import selo_situacao, editor_dependentes %}
+{% from "_foto.html" import campo_foto, recursos_cropper %}
 
 {% block title %}SGC - Editar Associado{% endblock %}
 
 {% block content %}
+{{ recursos_cropper() }}
 <div class="card shadow-sm border-0">
     <div class="card-header card-header-agmeal d-flex justify-content-between align-items-center">
         <span><i class="fa-solid fa-user-pen me-2"></i>Editando Cadastro: {{ associado.nome }} {{ selo_situacao(associado) }}</span>
@@ -17,20 +19,8 @@
     <div class="card-body">
         <form action="{{ url_for('editar', id=associado.id) }}" method="POST" enctype="multipart/form-data" class="form-submit-loading" data-loading-label="Salvando…">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <div class="row mb-4 bg-light p-3 rounded align-items-center">
-                <div class="col-md-2 text-center">
-                    {% if associado.foto_perfil %}
-                        <img src="{{ url_for('static', filename='uploads/fotos/' ~ associado.foto_perfil) }}" class="img-thumbnail" style="width: 100px; height: 130px; object-fit: cover;">
-                    {% else %}
-                        <div class="border rounded bg-white text-muted d-flex align-items-center justify-content-center" style="width: 100px; height: 130px;">Sem Foto</div>
-                    {% endif %}
-                </div>
-                <div class="col-md-10">
-                    <label class="form-label fw-bold"><i class="fa-solid fa-camera me-2"></i>Atualizar Foto (3x4)</label>
-                    <input type="file" class="form-control" name="foto_perfil" accept="image/png, image/jpeg">
-                    <small class="text-muted">Deixe em branco se não quiser alterar a foto atual.</small>
-                </div>
-            </div>
+            {{ campo_foto(foto_url=url_for('static', filename='uploads/fotos/' ~ associado.foto_perfil) if associado.foto_perfil else '',
+                          rotulo='Atualizar Foto (3x4)', ajuda='Deixe em branco para manter a foto atual. A nova foto será aberta para ajustar o enquadramento.') }}
 
             <div class="row">
                 <div class="col-md-6 mb-3">
