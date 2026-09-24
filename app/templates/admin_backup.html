@@ -15,6 +15,31 @@
             (Google Drive, OneDrive, etc.).
         </p>
 
+        {% set st = situacao.status %}
+        <div class="alert {{ 'alert-warning' if situacao.alerta else 'alert-success' }} border-0 small">
+            <p class="mb-1 fw-bold"><i class="fa-solid fa-robot me-2"></i>Backup automático:
+                {% if situacao.automatico %}ligado{% else %}desligado{% endif %}</p>
+            {% if situacao.automatico %}
+            <p class="mb-1">Um novo backup é feito sempre que o último tiver mais de
+                <strong>{{ situacao.intervalo_horas|round|int }} horas</strong> (verificado a cada 10 minutos, inclusive logo após ligar o computador).</p>
+            {% else %}
+            <p class="mb-1">Para ligar, remova <code>BACKUP_AUTO=0</code> do ambiente do servidor.</p>
+            {% endif %}
+            <p class="mb-0">
+                Último backup neste computador:
+                {% if situacao.idade_horas is none %}<strong>nenhum</strong>
+                {% elif situacao.idade_horas < 1 %}<strong>há menos de 1 hora</strong>
+                {% elif situacao.idade_horas < 48 %}<strong>há {{ situacao.idade_horas|round|int }} horas</strong>
+                {% else %}<strong>há {{ situacao.idade_dias|round(0, 'floor')|int }} dias</strong>{% endif %}
+                {% if st.ultimo_sucesso %} · último sucesso registrado em {{ st.ultimo_sucesso.replace('T', ' ') }}{% endif %}
+            </p>
+            {% if situacao.falhou %}
+            <p class="mb-0 mt-2 text-danger"><i class="fa-solid fa-circle-xmark me-1"></i>
+                Falha em {{ st.ultima_falha.replace('T', ' ') }}: {{ st.erro }}</p>
+            {% endif %}
+            <p class="mb-0 mt-2 text-muted">Todo backup é verificado (ZIP íntegro e banco sem corrupção) antes de ser guardado.</p>
+        </div>
+
         <div class="alert alert-secondary border-0 small">
             <p class="mb-1 fw-bold"><i class="fa-solid fa-folder-tree me-2"></i>Pasta de sincronização (opcional)</p>
             {% if sync_dir %}

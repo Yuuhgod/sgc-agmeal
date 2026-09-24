@@ -218,6 +218,7 @@ def _gerar_nome_foto(matricula, extensao):
 
 db.init_app(app)
 
+import backup_agendador
 from backup_service import criar_backup_zip, listar_backups_locais
 from planilha_service import gerar_csv, gerar_xlsx
 from restore_service import aplicar_restauracao, extrair_zip_seguro
@@ -242,6 +243,61 @@ def _backup_keep_sync():
 def _backup_sync_dir():
     d = os.environ.get('BACKUP_SYNC_DIR', '').strip()
     return d or None
+
+
+def _env_float(nome, padrao, minimo):
+    try:
+        return max(minimo, float(os.environ.get(nome, padrao)))
+    except ValueError:
+        return float(padrao)
+
+
+# Backup automático: ligado por padrão; gera quando o último tiver mais que o intervalo.
+BACKUP_AUTO = os.environ.get('BACKUP_AUTO', '1').lower() not in ('0', 'false', 'no', 'nao', 'não')
+BACKUP_AUTO_INTERVALO_HORAS = _env_float('BACKUP_AUTO_INTERVALO_HORAS', '24', 1)
+# O painel alerta os admins se o backup mais recente for mais velho que isto.
+BACKUP_ALERTA_DIAS = _env_float('BACKUP_ALERTA_DIAS', '3', 1)
+
+
+def _executar_backup_automatico():
+    info = criar_backup_zip(
+        data_dir=data_dir,
+        upload_folder=UPLOAD_FOLDER,
+        backups_dir=backups_dir,
+        sync_dir=_backup_sync_dir(),
+        keep_local=_backup_keep_local(),
+        keep_sync=_backup_keep_sync(),
+        log=app.logger,
+    )
+    # Fora de uma requisição: grava a auditoria direto (sem sessão/IP).
+    db.session.add(Auditoria(
+        usuario_id=None,
+        usuario_username='backup-automático',
+        acao=ACAO_SISTEMA_BACKUP,
+        entidade='backup',
+        descricao='Backup ZIP (automático)',
+        detalhes=f"arquivo={info['zip_filename']}\ntamanho_bytes={info['size_bytes']}\n"
+                 f"copia_nuvem={'sim' if info['sync_path'] else 'não'}",
+    ))
+    db.session.commit()
+    return info
+
+
+def _situacao_backup():
+    """Resumo para a interface: idade do último backup, último erro e se merece alerta."""
+    idade = backup_agendador.idade_ultimo_backup_horas(backups_dir, listar_backups_locais)
+    status = backup_agendador.ler_status(backups_dir)
+    falhou = bool(status.get('ultima_falha')) and (status.get('ultima_falha') or '') > (status.get('ultimo_sucesso') or '')
+    return {
+        'idade_horas': idade,
+        'idade_dias': None if idade is None else idade / 24,
+        'status': status,
+        'falhou': falhou,
+        'alerta': falhou or idade is None or idade > BACKUP_ALERTA_DIAS * 24,
+        'automatico': BACKUP_AUTO,
+        'intervalo_horas': BACKUP_AUTO_INTERVALO_HORAS,
+        'alerta_dias': BACKUP_ALERTA_DIAS,
+    }
 
 
 def _exportar_pdf_max_sem_filtro() -> int:
@@ -411,6 +467,20 @@ def validar_cpf(cpf):
         return False
 
     return True
+
+
+@app.before_request
+def iniciar_agendador_backup():
+    """Sobe o agendador na primeira requisição do processo (não em CLI/migrações/testes)."""
+    if BACKUP_AUTO and not app.testing:
+        backup_agendador.iniciar(
+            app,
+            data_dir=data_dir,
+            backups_dir=backups_dir,
+            executar_backup=_executar_backup_automatico,
+            listar=listar_backups_locais,
+            intervalo_horas=BACKUP_AUTO_INTERVALO_HORAS,
+        )
 
 
 @app.before_request
@@ -833,6 +903,7 @@ def dashboard():
         novos_no_mes=novos_no_mes,
         admissoes_por_ano=admissoes_por_ano,
         admissoes_max=max((n for _, n in admissoes_por_ano), default=0),
+        situacao_backup=_situacao_backup() if session.get('role') == ROLE_ADMIN else None,
     )
 
 
@@ -1866,6 +1937,7 @@ def admin_backup():
         username=session.get('username'),
         sync_dir=sync_dir,
         recentes=recentes,
+        situacao=_situacao_backup(),
         keep_local=_backup_keep_local(),
         keep_sync=_backup_keep_sync(),
     )
@@ -1895,11 +1967,18 @@ def admin_backup_gerar():
             keep_sync=_backup_keep_sync(),
             log=current_app.logger,
         )
-    except Exception:
+    except Exception as exc:
         current_app.logger.exception('Falha ao gerar backup')
+        agora_iso = datetime.now().isoformat(timespec='seconds')
+        backup_agendador.gravar_status(backups_dir, ultima_tentativa=agora_iso, ultima_falha=agora_iso, erro=str(exc)[:300])
         flash('Não foi possível gerar o backup. Verifique permissões de pasta e o log do servidor.', 'danger')
         return redirect(url_for('admin_backup'))
 
+    agora_iso = datetime.now().isoformat(timespec='seconds')
+    backup_agendador.gravar_status(
+        backups_dir, ultima_tentativa=agora_iso, ultimo_sucesso=agora_iso, erro=None,
+        arquivo=info['zip_filename'], copia_nuvem=bool(info['sync_path']),
+    )
     detalhes = (
         f"arquivo={info['zip_filename']}\n"
         f"tamanho_bytes={info['size_bytes']}\n"

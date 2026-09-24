@@ -18,6 +18,7 @@ quem quiser empacotar o mesmo código noutro ambiente.
 - **Painel:** aniversariantes do mês (ativos), gráfico de admissões por ano (últimos 10 anos) e contagem por situação.
 - **Planilhas:** exportação em **Excel (.xlsx)** e **CSV** (separado por `;`, abre direto no Excel em português) com os mesmos filtros da busca/lista. Cada exportação fica registrada na auditoria (quem, quantos registros e com quais filtros).
 - **Geração de PDF:** fichas individuais e relatórios em lote utilizando `WeasyPrint`.
+- **Backup automático:** o próprio servidor gera um backup sempre que o último tiver mais de `BACKUP_AUTO_INTERVALO_HORAS` (padrão 24h). Verifica a cada 10 minutos, então um PC desligado à noite faz o backup logo depois de ligado. Só um processo do Gunicorn roda o agendador (lock de arquivo em `data/`). Todo backup, manual ou automático, é verificado (ZIP íntegro e banco sem corrupção) antes de ser guardado. O painel alerta os admins quando o último backup passa de `BACKUP_ALERTA_DIAS` ou quando a última tentativa falhou.
 - **Backup (admin):** ZIP com banco (cópia segura SQLite), fotos e segredo de sessão; cópia opcional para pasta sincronizada (Google Drive / OneDrive).
 - **Restaurar (admin):** upload de ZIP com confirmações explícitas (texto + caixa) e backup de segurança automático antes de substituir dados; ver secção *Restauração* abaixo.
 - **Interface:** front-end responsivo com Bootstrap 5 e FontAwesome.
@@ -85,6 +86,9 @@ bash start.sh      # inicia o servidor
 |---|---|---|
 | `SGC_DATA_DIR` | `data/` na raiz do projeto | Pasta com o banco, backups e segredo de sessão. Os testes usam uma pasta temporária por aqui. |
 | `SESSAO_INATIVIDADE_MINUTOS` | `30` | Minutos sem uso até a sessão expirar (o limite absoluto continua 8 horas). |
+| `BACKUP_AUTO` | `1` | `0` desliga o backup automático (o manual e o `scripts/backup_cli.py` continuam funcionando). |
+| `BACKUP_AUTO_INTERVALO_HORAS` | `24` | Idade máxima do último backup antes de o agendador gerar outro. |
+| `BACKUP_ALERTA_DIAS` | `3` | Idade do último backup a partir da qual o painel alerta os administradores. |
 | `SECRET_KEY` | gerada em `data/.flask_secret` | Chave de sessão/CSRF. Defina uma fixa em produção. |
 | `SESSION_COOKIE_SECURE` | `false` | Deixe `true` quando servir via HTTPS. |
 | `GUNICORN_WORKERS` | `3` | Número de workers do Gunicorn. |
